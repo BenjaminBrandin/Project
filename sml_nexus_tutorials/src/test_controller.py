@@ -19,7 +19,7 @@ class Controller():
     #=====================================
     def __init__(self):
         #Initialize node
-        rospy.init_node('test_controller')
+        rospy.init_node('controller')
 
         #Get tracked object name from parameters
         robot_name = rospy.get_param('~robot_name')
@@ -66,7 +66,7 @@ class Controller():
             t  = rospy.Time.now().to_sec()
             
             if (t < self.last_received_pose.to_sec() + timeout):
-                x = ca.vertcat(self.robot_pose.pose.position.x, self.robot_pose.pose.position.y)
+                x = ca.vertcat(self.robot_pose.pose.position.x, self.robot_pose.pose.position.y) # this is the state that should be a parameter in the qp problem
                 input_values['state_1'] = x
                 input_values['time'] = t
                 
@@ -82,11 +82,11 @@ class Controller():
                     u_hat = ca.MX.sym('u_hat', 2)
                     objective = u_hat.T @ Q @ u_hat
                     constraint = A @ u_hat + b 
-                    qp = {'x':u_hat, 'f':objective, 'g':constraint}
+                    qp = {'x':u_hat, 'f':objective, 'g':constraint} # build the function outside the loop
 
                     # Solving the quadratic program
                     qpsolver = ca.qpsol('u_opt', 'qpoases', qp) 
-                    u_opt = qpsolver(lbg=0)
+                    u_opt = qpsolver(lbg=0) #it needs the state os the robot and the state of the neighbors
 
                     # Extract control input
                     u_hat = u_opt['x']

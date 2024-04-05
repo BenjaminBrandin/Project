@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-#=====================================
-#      Simple controller for the        
-#          SML Nexus robot
-#               ----
-#   Listen to the robot pose from
-#    the mocap system and output a
-#   velocity command to drive the
-#    robot back and forth between
-#             two points
-#=====================================
 import sys
 import rospy
 import copy
@@ -18,9 +8,8 @@ import geometry_msgs.msg
 import tf2_ros
 import tf2_geometry_msgs
 from tf.transformations import euler_from_quaternion
-from builders import AlwaysOperator, StlTask, TimeInterval, go_to_goal_predicate_2d, create_barrier_from_task
-
-
+from simulation import barriers
+ 
 
 class Controller():
     #=====================================
@@ -29,41 +18,40 @@ class Controller():
     #=====================================
     def __init__(self):
         #Initialize node
-        rospy.init_node('test_controller')
+        rospy.init_node('controller')
 
-        #Get tracked object name from parameters
-        robot_name = rospy.get_param('~robot_name')
 
-        #Init robot pose
         self.robot_pose = geometry_msgs.msg.PoseStamped()
-
-        #Init last received pose time
+        self.tracked_object_pose = geometry_msgs.msg.PoseStamped()
         self.last_received_pose = rospy.Time()
+        vel_cmd_msg = geometry_msgs.msg.Twist()
+ 
 
-        #Init last received pose time
-        self.last_received_tracked_pose = rospy.Time()
-
-        #Timeout in seconds
-        timeout = 0.5
-
-        #Setup robot pose subscriber
+        # Get robot name from parameter server
+        robot_name = rospy.get_param('~robot_name')
         rospy.Subscriber("/qualisys/"+robot_name+"/pose", geometry_msgs.msg.PoseStamped, self.pose_callback)
 
+        # Get tracked object name from parameter server
+        if robot_name == "nexus2":
+            tracked_object = rospy.get_param('~tracked_object')
+            rospy.Subscriber("/qualisys/"+tracked_object+"/pose", geometry_msgs.msg.PoseStamped, self.tracked_object_pose_callback)
+        else:
+            pass
 
-        #Setup velocity command publisher
+        # Setup publisher
         vel_pub = rospy.Publisher("cmd_vel", geometry_msgs.msg.Twist, queue_size=100)
+
+
 
         #Setup transform subscriber
         tf_buffer = tf2_ros.Buffer()
         tf_listener = tf2_ros.TransformListener(tf_buffer)
-        #Wait for transform to be available
         while not tf_buffer.can_transform('mocap', robot_name, rospy.Time()):
             rospy.loginfo("Wait for transform to be available")
             rospy.sleep(1)
 
-        #Create a ROS Twist message for velocity command
-        vel_cmd_msg = geometry_msgs.msg.Twist()
 
+        
 
         #-----------------------------------------------------------------
         # Loop at set frequency and publish position command if necessary
@@ -71,37 +59,28 @@ class Controller():
         #loop frequency in Hz
         loop_frequency = 50
         r = rospy.Rate(loop_frequency)
+        timeout = 0.5
+
+        
+
+        input_values = {}
+        barrier = barriers[int(robot_name[-1])]
 
 
+        u_hat = ca.MX.sym('u_hat', 2)
         x_sym = ca.MX.sym('state', 2)
         t_sym = ca.MX.sym('time', 1)
-        A = ca.DM.zeros(1, 2)  
-        b = ca.DM.zeros(1)
+        A = ca.MX.sym('A', 1, 2)
+        b = ca.MX.sym('b', 1)
         Q = ca.DM_eye(2)
 
-        #======================================================
-        # Temporary code to test the barrier function
-        #======================================================
-        
-        #----------- Will get thesee by subscribing to a topic -----
-        initial_state = {1:np.array([0,0])} #This might even be initialized in the launch file
-        goal = np.array([5,4])
-        a = 20
-        b = 55
-        #------------------------------------------------------------
+        constraint = A @ u_hat + b 
 
-        predicate = go_to_goal_predicate_2d(goal=goal,epsilon = 1, position1=x_sym) # Don't have DynamicalModel
-        always    = AlwaysOperator(time_interval=TimeInterval(a=a,b=b)) 
-        task      = StlTask(predicate=predicate,temporal_operator=always)
+        objective = u_hat.T @ Q @ u_hat
+        params = ca.vertcat(x_sym, t_sym, A.T, b)
 
-        scale_factor    = 3
-        dummy_scalar    = ca.MX.sym('dummy_scalar',1)
-        alpha_fun  = ca.Function('alpha_fun',[dummy_scalar],[scale_factor*dummy_scalar]) 
-
-        barrier = create_barrier_from_task(task=task,initial_conditions=initial_state,alpha_function=alpha_fun)
-
-        #======================================================
-        input_values = {}
+        qp = {'x': u_hat, 'f': objective, 'g': constraint, 'p': params}
+        qpsolver = ca.qpsol('u_opt', 'qpoases', qp) 
         
 
         while not rospy.is_shutdown():
@@ -109,27 +88,34 @@ class Controller():
             t  = rospy.Time.now().to_sec()
             
             if (t < self.last_received_pose.to_sec() + timeout):
-                x = ca.vertcat(self.robot_pose.pose.position.x, self.robot_pose.pose.position.y)
-                input_values['state_1'] = x
-                input_values['time'] = t
                 
+                x = ca.vertcat(self.robot_pose.pose.position.x, self.robot_pose.pose.position.y)
+
+                if robot_name == "nexus2": 
+                    x_track = ca.vertcat(self.tracked_object_pose.pose.position.x, self.tracked_object_pose.pose.position.y)
+                    input_values['state_1'] = x
+                    input_values['state_2'] = x_track
+                elif robot_name == "nexus1":
+                    input_values['state_1'] = x
+                else:
+                    pass
+
+                input_values["time"] = t
+
+              
+                # names = [name for name in barrier.name_in() if name != "time"]
+                # for name in names:
+
                 # Compute the barrier function value and its gradients
                 barrier_val = barrier.function.call(input_values)['value']
-                A = barrier.gradient_function_wrt_state_of_agent(1).call(input_values)['value'] # Change so it works with multiple agents
-                b = barrier.partial_time_derivative.call(input_values)['value'] + barrier_val
+                A_val = barrier.gradient_function_wrt_state_of_agent(1).call(input_values)['value'] 
+                b_val = barrier.partial_time_derivative.call(input_values)['value'] + barrier_val
 
-                if np.linalg.norm(A) < 1e-10:
+                if np.linalg.norm(A_val) < 1e-10:
                     u_hat = ca.MX([0, 0])
                 else:
-                    # Defining the problem and the inequality constraints
-                    u_hat = ca.MX.sym('u_hat', 2)
-                    objective = u_hat.T @ Q @ u_hat
-                    constraint = A @ u_hat + b 
-                    qp = {'x':u_hat, 'f':objective, 'g':constraint}
-
-                    # Solving the quadratic program
-                    qpsolver = ca.qpsol('u_opt', 'qpoases', qp) 
-                    u_opt = qpsolver(lbg=0)
+                    param_values = ca.vertcat(x, t, A_val.T, b_val)
+                    u_opt = qpsolver(lbg=0, p=param_values) # it needs the state of the robot and the state of the neighbors
 
                     # Extract control input
                     u_hat = u_opt['x']
@@ -158,10 +144,7 @@ class Controller():
             #---------------------------------
             r.sleep()
 
-    #=====================================
-    #          Callback function 
-    #      for robot pose feedback
-    #=====================================
+
     def pose_callback(self, pose_stamped_msg):
         #Save robot pose as class variable
         self.robot_pose = pose_stamped_msg
@@ -170,6 +153,12 @@ class Controller():
         self.last_received_pose = rospy.Time.now()
 
 
+    def tracked_object_pose_callback(self, pose_stamped_msg):
+        #Save robot pose as class variable
+        self.tracked_object_pose = pose_stamped_msg
+
+        #Save when last pose was received
+        self.last_received_tracked_pose = rospy.Time.now()
 
 
 #=====================================

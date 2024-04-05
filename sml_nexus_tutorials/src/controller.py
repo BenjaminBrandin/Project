@@ -8,9 +8,8 @@ import geometry_msgs.msg
 import tf2_ros
 import tf2_geometry_msgs
 from tf.transformations import euler_from_quaternion
-from simulation import barriers
-
-
+from simulation_graph import barriers
+ 
 
 class Controller():
     #=====================================
@@ -21,16 +20,28 @@ class Controller():
         #Initialize node
         rospy.init_node('controller')
 
-        #Get tracked object name from parameters
-        robot_name = rospy.get_param('~robot_name')
 
         self.robot_pose = geometry_msgs.msg.PoseStamped()
+        self.tracked_object_pose = geometry_msgs.msg.PoseStamped()
         self.last_received_pose = rospy.Time()
         vel_cmd_msg = geometry_msgs.msg.Twist()
  
-        #Setup robot pose subscriber and velocity command publisher
+
+        # Get robot name from parameter server
+        robot_name = rospy.get_param('~robot_name')
         rospy.Subscriber("/qualisys/"+robot_name+"/pose", geometry_msgs.msg.PoseStamped, self.pose_callback)
+
+        # Get tracked object name from parameter server
+        if robot_name == "nexus2" or robot_name == "nexus3":
+            tracked_object = rospy.get_param('~tracked_object')
+            rospy.Subscriber("/qualisys/"+tracked_object+"/pose", geometry_msgs.msg.PoseStamped, self.tracked_object_pose_callback)
+        else:
+            pass
+
+        # Setup publisher
         vel_pub = rospy.Publisher("cmd_vel", geometry_msgs.msg.Twist, queue_size=100)
+
+
 
         #Setup transform subscriber
         tf_buffer = tf2_ros.Buffer()
@@ -50,15 +61,27 @@ class Controller():
         r = rospy.Rate(loop_frequency)
         timeout = 0.5
 
-        x_sym = ca.MX.sym('state', 2)
-        t_sym = ca.MX.sym('time', 1)
-        A = ca.DM.zeros(1, 2)  
-        b = ca.DM.zeros(1)
-        Q = ca.DM_eye(2)
-
+        
 
         input_values = {}
         barrier = barriers[int(robot_name[-1])]
+
+        states = [name for name in barrier.function.name_in() if name != "time"]
+
+        u_hat = ca.MX.sym('u_hat', 2)
+        x_sym = ca.MX.sym('state', 2)
+        t_sym = ca.MX.sym('time', 1)
+        A = ca.MX.sym('A', 1, 2)
+        b = ca.MX.sym('b', 1)
+        Q = ca.DM_eye(2)
+
+        constraint = A @ u_hat + b 
+
+        objective = u_hat.T @ Q @ u_hat
+        params = ca.vertcat(x_sym, t_sym, A.T, b)
+
+        qp = {'x': u_hat, 'f': objective, 'g': constraint, 'p': params}
+        qpsolver = ca.qpsol('u_opt', 'qpoases', qp) 
         
 
         while not rospy.is_shutdown():
@@ -66,27 +89,28 @@ class Controller():
             t  = rospy.Time.now().to_sec()
             
             if (t < self.last_received_pose.to_sec() + timeout):
-                x = ca.vertcat(self.robot_pose.pose.position.x, self.robot_pose.pose.position.y) # this is the state that should be a parameter in the qp problem
-                input_values['state_1'] = x
-                input_values['time'] = t
                 
+                x = ca.vertcat(self.robot_pose.pose.position.x, self.robot_pose.pose.position.y)
+                input_values["time"] = t
+                input_values['state_1'] = x
+
+                if robot_name == "nexus2" or robot_name == "nexus3": 
+                    x_track = ca.vertcat(self.tracked_object_pose.pose.position.x, self.tracked_object_pose.pose.position.y)    
+                    input_values['state_2'] = x_track
+                else:
+                    pass
+
+
                 # Compute the barrier function value and its gradients
                 barrier_val = barrier.function.call(input_values)['value']
-                A = barrier.gradient_function_wrt_state_of_agent(1).call(input_values)['value'] 
-                b = barrier.partial_time_derivative.call(input_values)['value'] + barrier_val
+                A_val = barrier.gradient_function_wrt_state_of_agent(1).call(input_values)['value'] 
+                b_val = barrier.partial_time_derivative.call(input_values)['value'] + barrier_val
 
-                if np.linalg.norm(A) < 1e-10:
+                if np.linalg.norm(A_val) < 1e-10:
                     u_hat = ca.MX([0, 0])
                 else:
-                    # Defining the problem and the inequality constraints
-                    u_hat = ca.MX.sym('u_hat', 2)
-                    objective = u_hat.T @ Q @ u_hat
-                    constraint = A @ u_hat + b 
-                    qp = {'x':u_hat, 'f':objective, 'g':constraint} # build the function outside the loop
-
-                    # Solving the quadratic program
-                    qpsolver = ca.qpsol('u_opt', 'qpoases', qp) 
-                    u_opt = qpsolver(lbg=0) #it needs the state os the robot and the state of the neighbors
+                    param_values = ca.vertcat(x, t, A_val.T, b_val)
+                    u_opt = qpsolver(lbg=0, p=param_values) # it needs the state of the robot and the state of the neighbors
 
                     # Extract control input
                     u_hat = u_opt['x']
@@ -118,10 +142,18 @@ class Controller():
 
     def pose_callback(self, pose_stamped_msg):
         #Save robot pose as class variable
-        self.robot_pose = pose_stamped_msg
+        self.robot_pose = pose_stamped_msg  # could try to use a dictionary for the callbacks to directly assign the pose th the right states
 
         #Save when last pose was received
         self.last_received_pose = rospy.Time.now()
+
+
+    def tracked_object_pose_callback(self, pose_stamped_msg):
+        #Save robot pose as class variable
+        self.tracked_object_pose = pose_stamped_msg
+
+        #Save when last pose was received
+        self.last_received_tracked_pose = rospy.Time.now()
 
 
 #=====================================

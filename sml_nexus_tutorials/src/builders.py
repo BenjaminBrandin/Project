@@ -473,7 +473,7 @@ class StlTask :
     
 
 
-def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, position1:ca.MX) ->PredicateFunction:
+def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, position:ca.MX) ->PredicateFunction:
     
     # try :
     #     position1 = model_agent.substates_dict[StateName.POSITION2D] #extract the required 2d position
@@ -481,22 +481,107 @@ def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, position1:ca.MX) ->P
     #     raise ValueError("The given dynamical models do not have a 2D position as a substate. The epsilon closeness predicate can only be applied to models with a 2D position as a substate")
     
     
-    if position1.numel() != goal.size:
-        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(position1.numel()) + " and " + str(goal.size) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
+    if position.numel() != goal.size:
+        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(position.numel()) + " and " + str(goal.size) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
     
     
     if len(goal.shape) <2 :
         goal = goal[:,np.newaxis]
         
         
-    predicate_expression = ( epsilon**2 - ca.dot((position1 - goal),(position1-goal)) ) # the scaling will make the time derivative smaller whe you built the barrier function
-    predicate            = ca.Function("position_epsilon_closeness",[position1],
+    predicate_expression = ( epsilon**2 - ca.dot((position - goal),(position-goal)) ) # the scaling will make the time derivative smaller whe you built the barrier function
+    predicate            = ca.Function("position_epsilon_closeness",[position],
                                                                     [predicate_expression],
                                                                     ["state_"+str(1)],
                                                                     ["value"]) # this defined an hyperplane function
 
     return PredicateFunction(function=predicate)
 
+
+def epsilon_position_closeness_predicate(epsilon:float, position_i:ca.MX, position_j:ca.MX, agents:np.ndarray) ->PredicateFunction: # Does not need to be called state_1 and state_2
+    """
+    Helper function to create a closeness relation predicate in the form ||position1-position2|| <= epsilon.
+    This predicate is useful to dictate some closeness relation among two agents for example. The helper function can only be applied of 
+    the models have a states StateName.POSITION2D as a substate. Otherwise the function will give an error.
+    
+    Args:
+        epsilon  : the closeness value
+        model_agent_i : the first agent
+        model_agent_j : the second agent
+    
+    Returns:
+        PredicateFunction : the predicate function 
+        
+    
+    Example:
+    >>> car_1 = DifferentialDrive(...)
+    >>> car_2 = DifferentialDrive(...)
+    >>> epsilon = 0.1
+    >>> closeness_predicate = epsilon_position_closeness_predicate(epsilon,car_1,car_2)
+    
+    """
+
+
+    if position_i.shape != position_j.shape :
+        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(position_i.shape) + " and " + str(position_j.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
+    
+    
+    predicate_expression =  ( epsilon**2 - ca.sumsqr(position_i - position_j) ) # the scaling will make the time derivative smaller whe you built the barrier function
+    predicate            = ca.Function("position_epsilon_closeness",[position_i, position_j],
+                                                                    [predicate_expression],
+                                                                    ["state_"+str(agents[0]),"state_"+str(agents[1])],
+                                                                    ["value"]) # this defined an hyperplane function
+
+    return PredicateFunction(function=predicate)
+
+
+def formation_predicate(epsilon:float, position_i:ca.MX, position_j:ca.MX, agents:np.ndarray, relative_pos:np.ndarray, direction_i_to_j:bool=True) ->PredicateFunction:
+    """
+    Helper function to create a closeness relation predicate witha  certain relative position vector. in the form ||position1-position2|| <= epsilon.
+    This predicate is useful to dictate some closeness relation among two agents for example. The helper function can only be applied of 
+    the models have a states StateName.POSITION2D as a substate. Otherwise the function will give an error.
+    
+    Args:
+        epsilon  : the closeness value
+        model_agent_i : the first agent
+        model_agent_j : the second agent
+    
+    Returns:
+        PredicateFunction : the predicate function 
+        
+    
+    Example:
+    >>> car_1 = DifferentialDrive(...)
+    >>> car_2 = DifferentialDrive(...)
+    >>> epsilon = 0.1
+    >>> closeness_predicate = epsilon_position_closeness_predicate(epsilon,car_1,car_2)
+    
+    """
+
+    # try :
+    #     position_i = model_agent_i.substates_dict[StateName.POSITION2D] #extract the required 2d position
+    #     position_j = model_agent_j.substates_dict[StateName.POSITION2D] 
+    # except :
+    #     raise ValueError("The given dynamical models do not have a 2D position as a substate. The epsilon closeness predicate can only be applied to models with a 2D position as a substate")
+    
+
+    if position_i.shape != position_j.shape :
+        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(position_i.shape) + " and " + str(position_j.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
+    
+    if relative_pos.shape[0] != position_i.shape[0] :
+        raise ValueError("The relative position vector must have the same dimension as the position of the agents. Agents have position dimension " + str(position_i.shape) + " and the relative position vector has dimension " + str(relative_pos.shape) )
+    
+    if direction_i_to_j :
+        predicate_expression =  ( epsilon**2 - (position_j - position_i- relative_pos).T@(position_j-position_i - relative_pos) ) # the scaling will make the time derivative smaller whe you built the barrier function
+    else :
+        predicate_expression =  ( epsilon**2 - (position_i - position_j- relative_pos).T@(position_i-position_j - relative_pos) )
+    
+    predicate            = ca.Function("position_epsilon_closeness",[position_i,position_j],
+                                                                    [predicate_expression],
+                                                                    ["state_"+str(agents[0]),"state_"+str(agents[1])],
+                                                                    ["value"]) # this defined an hyperplane function
+
+    return PredicateFunction(function=predicate)
 
 
 def create_barrier_from_task(task:StlTask,initial_conditions :Dict[UniqueIdentifier,np.ndarray],alpha_function: ca.Function = None,t_init:float = 0 ) -> BarrierFunction:
@@ -578,8 +663,10 @@ def create_barrier_from_task(task:StlTask,initial_conditions :Dict[UniqueIdentif
             
             if predicate_initial_value <=0:
                 gamma0 = - predicate_initial_value*1.2 # this gives you always a gamma function that is at 45 degrees decay. It is an heuristic
-            if predicate_initial_value >0:
+            elif predicate_initial_value >0:
                 gamma0 =  - predicate_initial_value*0.8
+            else:
+                gamma0 = - predicate_initial_value
                 
             a = gamma0/(time_of_satisfaction-t_init)**2
             b = -2*gamma0/(time_of_satisfaction-t_init)
