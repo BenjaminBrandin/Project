@@ -3,7 +3,7 @@ import numpy as np
 import casadi as ca
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Tuple, Dict, TypeVar, Optional, Union
+from typing import Tuple, Dict, List, TypeVar, Optional, Union
 
 UniqueIdentifier = int 
 
@@ -91,7 +91,17 @@ def get_id_from_input_name(input_name: str) -> UniqueIdentifier:
     
     return ids   
 
+# ============ Move class to a better place =================
+class Robot:
+    def __init__(self, id: int, initial_state: np.ndarray):
+        self.id = id
+        self.symbolic_state = ca.MX.sym(f'state_{id}', 2)
+        self.state = initial_state
 
+    def update_state(self, new_state):
+        self.state = new_state
+
+# ==========================================================
 
 class PredicateFunction :
     """
@@ -473,7 +483,7 @@ class StlTask :
     
 
 
-def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, position:ca.MX) ->PredicateFunction:
+def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, agent:Robot) ->PredicateFunction:
     
     # try :
     #     position1 = model_agent.substates_dict[StateName.POSITION2D] #extract the required 2d position
@@ -481,24 +491,24 @@ def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, position:ca.MX) ->Pr
     #     raise ValueError("The given dynamical models do not have a 2D position as a substate. The epsilon closeness predicate can only be applied to models with a 2D position as a substate")
     
     
-    if position.numel() != goal.size:
-        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(position.numel()) + " and " + str(goal.size) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
+    if agent.symbolic_state.numel() != goal.size:
+        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent.symbolic_state.s) + " and " + str(goal.size) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
     
     
     if len(goal.shape) <2 :
         goal = goal[:,np.newaxis]
         
         
-    predicate_expression = ( epsilon**2 - ca.dot((position - goal),(position-goal)) ) # the scaling will make the time derivative smaller whe you built the barrier function
-    predicate            = ca.Function("position_epsilon_closeness",[position],
+    predicate_expression = ( epsilon**2 - ca.dot((agent.symbolic_state - goal),(agent.symbolic_state-goal)) ) # the scaling will make the time derivative smaller whe you built the barrier function
+    predicate            = ca.Function("position_epsilon_closeness",[agent.symbolic_state],
                                                                     [predicate_expression],
-                                                                    ["state_"+str(1)],
+                                                                    ["state_"+str(agent.id)],
                                                                     ["value"]) # this defined an hyperplane function
 
     return PredicateFunction(function=predicate)
 
 
-def epsilon_position_closeness_predicate(epsilon:float, position_i:ca.MX, position_j:ca.MX, agents:np.ndarray) ->PredicateFunction: # Does not need to be called state_1 and state_2
+def epsilon_position_closeness_predicate(epsilon:float, agent_i:Robot, agent_j:Robot) ->PredicateFunction: # Does not need to be called state_1 and state_2
     """
     Helper function to create a closeness relation predicate in the form ||position1-position2|| <= epsilon.
     This predicate is useful to dictate some closeness relation among two agents for example. The helper function can only be applied of 
@@ -522,20 +532,20 @@ def epsilon_position_closeness_predicate(epsilon:float, position_i:ca.MX, positi
     """
 
 
-    if position_i.shape != position_j.shape :
-        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(position_i.shape) + " and " + str(position_j.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
+    if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
+        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
     
     
-    predicate_expression =  ( epsilon**2 - ca.sumsqr(position_i - position_j) ) # the scaling will make the time derivative smaller whe you built the barrier function
-    predicate            = ca.Function("position_epsilon_closeness",[position_i, position_j],
+    predicate_expression =  ( epsilon**2 - ca.sumsqr(agent_i.symbolic_state - agent_j.symbolic_state) ) # the scaling will make the time derivative smaller whe you built the barrier function
+    predicate            = ca.Function("position_epsilon_closeness",[agent_i.symbolic_state, agent_j.symbolic_state],
                                                                     [predicate_expression],
-                                                                    ["state_"+str(agents[0]),"state_"+str(agents[1])],
+                                                                    ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
                                                                     ["value"]) # this defined an hyperplane function
 
     return PredicateFunction(function=predicate)
 
 
-def formation_predicate(epsilon:float, position_i:ca.MX, position_j:ca.MX, agents:np.ndarray, relative_pos:np.ndarray, direction_i_to_j:bool=True) ->PredicateFunction:
+def formation_predicate(epsilon:float, agent_i:Robot, agent_j:Robot, relative_pos:np.ndarray, direction_i_to_j:bool=True) ->PredicateFunction:
     """
     Helper function to create a closeness relation predicate witha  certain relative position vector. in the form ||position1-position2|| <= epsilon.
     This predicate is useful to dictate some closeness relation among two agents for example. The helper function can only be applied of 
@@ -565,26 +575,26 @@ def formation_predicate(epsilon:float, position_i:ca.MX, position_j:ca.MX, agent
     #     raise ValueError("The given dynamical models do not have a 2D position as a substate. The epsilon closeness predicate can only be applied to models with a 2D position as a substate")
     
 
-    if position_i.shape != position_j.shape :
-        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(position_i.shape) + " and " + str(position_j.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
+    if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
+        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
     
-    if relative_pos.shape[0] != position_i.shape[0] :
-        raise ValueError("The relative position vector must have the same dimension as the position of the agents. Agents have position dimension " + str(position_i.shape) + " and the relative position vector has dimension " + str(relative_pos.shape) )
+    if relative_pos.shape[0] != agent_i.symbolic_state.shape[0]:
+        raise ValueError("The relative position vector must have the same dimension as the position of the agents. Agents have position dimension " + str(agent_i.symbolic_state.shape) + " and the relative position vector has dimension " + str(relative_pos.shape) )
     
     if direction_i_to_j :
-        predicate_expression =  ( epsilon**2 - (position_j - position_i- relative_pos).T@(position_j-position_i - relative_pos) ) # the scaling will make the time derivative smaller whe you built the barrier function
+        predicate_expression =  ( epsilon**2 - (agent_j.symbolic_state - agent_i.symbolic_state- relative_pos).T@(agent_j.symbolic_state-agent_i.symbolic_state - relative_pos) ) # the scaling will make the time derivative smaller whe you built the barrier function
     else :
-        predicate_expression =  ( epsilon**2 - (position_i - position_j- relative_pos).T@(position_i-position_j - relative_pos) )
+        predicate_expression =  ( epsilon**2 - (agent_i.symbolic_state - agent_j.symbolic_state- relative_pos).T@(agent_i.symbolic_state-agent_j.symbolic_state - relative_pos) )
     
-    predicate            = ca.Function("position_epsilon_closeness",[position_i,position_j],
+    predicate            = ca.Function("position_epsilon_closeness",[agent_i.symbolic_state,agent_j.symbolic_state],
                                                                     [predicate_expression],
-                                                                    ["state_"+str(agents[0]),"state_"+str(agents[1])],
+                                                                    ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
                                                                     ["value"]) # this defined an hyperplane function
 
     return PredicateFunction(function=predicate)
 
 
-def create_barrier_from_task(task:StlTask,initial_conditions :Dict[UniqueIdentifier,np.ndarray],alpha_function: ca.Function = None,t_init:float = 0 ) -> BarrierFunction:
+def create_barrier_from_task(task:StlTask, initial_conditions:List[Robot], alpha_function:ca.Function = None, t_init:float = 0) -> BarrierFunction:
     """
     Creates a barrier function from a given STLtask in the form of b(x,t) = mu(x) + gamma(t-t_init) 
     where mu(x) is the predicate and gamma(t) is a suitably defined time function 
@@ -603,24 +613,23 @@ def create_barrier_from_task(task:StlTask,initial_conditions :Dict[UniqueIdentif
     contributing_agents  = task.contributing_agents # list of contributing agents. In the case of this controller this is always going to be 2 agents : the self agent and another agent
     
     # check that all the agents are present
-    if not all([agent_id in initial_conditions.keys() for agent_id in contributing_agents]) :
+    if not all(any(agent_id == agent.id for agent in initial_conditions) for agent_id in contributing_agents):
         raise ValueError("The initial conditions for the contributing agents are not complete. Contributing agents are " + str(contributing_agents) + " and the initial conditions are given for " + str(initial_conditions.keys()))
     
-    # check that the sates sizes match
-    for agent_id in contributing_agents :
-        if not (task.predicate.function.size1_in("state_"+str(agent_id)) == initial_conditions[agent_id].shape[0]) :
-            raise ValueError("The initial condition for agent " + str(agent_id) + " has a different size than the state of the agent. The size of the state is " + str(task.predicate.function.size1_in("state_"+str(agent_id))) + " and the size of the initial condition is " + str(initial_conditions[agent_id].shape[0]))
-        
-    
+    # # check that the sates sizes match
+    for agent in initial_conditions:
+        if not (task.predicate.function.size1_in("state_"+str(agent.id)) == agent.symbolic_state.shape[0]):
+            raise ValueError("The initial condition for agent " + str(agent.id) + " has a different size than the state of the agent. The size of the state is " + str(task.predicate.function.size1_in("state_"+str(agent.id))) + " and the size of the initial condition is " + str(agent.symbolic_state.shape[0]))
+
     # determine the initial values of the barrier function 
-    initial_inputs   = {state_name_str(agent_id) : initial_conditions[agent_id] for agent_id in contributing_agents} # create a dictionary with the initial state of the agents
+    initial_inputs = {state_name_str(agent.id): agent.state for agent in initial_conditions} # create a dictionary with the initial state of the agents
     symbolic_inputs = {}
-    
+
     # STATE SYMBOLIC INPUT
-    for agent_id in contributing_agents:
-        symbolic_inputs["state_"+str(agent_id)] = ca.MX.sym("state_"+str(agent_id),task.predicate.function.size_in("state_"+str(agent_id))) # create a dictionary with the initial state of the agents
-    
-    
+    for agent in initial_conditions:
+        symbolic_inputs["state_"+str(agent.id)] = ca.MX.sym("state_"+str(agent.id), task.predicate.function.size_in("state_"+str(agent.id))) # create a dictionary with the initial state of the agents
+        
+
     predicate_fun = task.predicate.function
     predicate_initial_value =  predicate_fun.call(initial_inputs)["value"]
     symbolic_predicate_value = predicate_fun.call(symbolic_inputs)["value"]
