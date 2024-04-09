@@ -6,94 +6,86 @@ from builders import *
 import matplotlib.pyplot as plt
 from graph_module import create_communication_graph_from_states, create_task_graph_from_edges
 
-# create a list of unique agents IDs
-agents_ids           = [1,2,3]
-communication_radius = 8.5
-# sensing_radius       = 4.
 
-
-# create initial conditions 
+# Parameters
+barriers = {}
 initial_states = {}
+scale_factor = 3
+communication_radius = 3.0
+
+# Initial states of the robots 
 state1 = np.array([0,0]) 
 state2 = np.array([0,-2])    
 state3 = np.array([0,2])     
-
 initial_states = {1:state1,2:state2,3:state3}
-# initial_time         = 0.
 
-comm_graph = create_communication_graph_from_states(initial_states,communication_radius)
+# Creating the robots
+robot_1 = Robot(id=1, initial_state=state1)
+robot_2 = Robot(id=2, initial_state=state2)
+robot_3 = Robot(id=3, initial_state=state3)
 
 # Select desired edge for tasks. Add self loops if you need, because they won't be added otherwise
 task_edges = [(1,1),(1,2),(1,3)]
 task_graph = create_task_graph_from_edges(edge_list = task_edges) # creates an empty task graph
+comm_graph = create_communication_graph_from_states(initial_states,communication_radius)
+
+# Creating the alpha function that is the same for all the tasks for now
+dummy_scalar = ca.MX.sym('dummy_scalar', 1)
+alpha_fun = ca.Function('alpha_fun', [dummy_scalar], [scale_factor * dummy_scalar])
 
 
-
-# ============ Task 1 =================
-symbolic_state = ca.MX.sym('state_1', 2)
-initial_state1 = {1: np.array([0, 0])}
-goal = np.array([6, 1])
-
+# ============ Task 1 =====================================================================================================
 edge_1    = task_graph[1][1]["container"]
-predicate = go_to_goal_predicate_2d(goal=goal, epsilon=1, position=symbolic_state)
-always = AlwaysOperator(time_interval=TimeInterval(a=20, b=55))
+predicate = go_to_goal_predicate_2d(goal=np.array([6, 1]), epsilon=0.1, agent=robot_1)
+always = AlwaysOperator(time_interval=TimeInterval(a=40, b=55))
 task = StlTask(predicate=predicate, temporal_operator=always)
+barriers[1] = create_barrier_from_task(task=task, initial_conditions=[robot_1], alpha_function=alpha_fun)
 edge_1.add_tasks(task)
-
-scale_factor = 3
-dummy_scalar = ca.MX.sym('dummy_scalar', 1)
-alpha_fun = ca.Function('alpha_fun', [dummy_scalar], [scale_factor * dummy_scalar])
-
-barrier1 = create_barrier_from_task(task=task, initial_conditions=initial_state1, alpha_function=alpha_fun)
-# ====================================
+# =========================================================================================================================
 
 
-# ============ Task 2 =================
-symbolic_state1 = ca.MX.sym('state_1', 2)
-symbolic_state2 = ca.MX.sym('state_2', 2)
-initial_states2 = {1: np.array([0, 0]), 2: np.array([0, -2])}
-
+# ============ Task 2 =====================================================================================================
 edge_12    = task_graph[1][2]["container"]
-predicate = formation_predicate(epsilon=0.1, position_i = symbolic_state2, position_j = symbolic_state1, agents = np.array([1, 2]), relative_pos=np.array([1,1])) # relative_pos is the added coord of the robot you want to follow
+predicate = formation_predicate(epsilon=0.1, agent_i = robot_2, agent_j = robot_1, relative_pos=np.array([1,1]))
 always    = EventuallyOperator(time_interval=TimeInterval(a=20,b=30)) 
 task      = StlTask(predicate=predicate,temporal_operator=always)
+barriers[2] = create_barrier_from_task(task=task, initial_conditions=[robot_1, robot_2], alpha_function=alpha_fun)
 edge_12.add_tasks(task)
-
-scale_factor = 3
-dummy_scalar = ca.MX.sym('dummy_scalar', 1)
-alpha_fun = ca.Function('alpha_fun', [dummy_scalar], [scale_factor * dummy_scalar])
-
-barrier2 = create_barrier_from_task(task=task, initial_conditions=initial_states2, alpha_function=alpha_fun)
-# ====================================
+# =========================================================================================================================
 
 
-# ============ Task 3 =================
-symbolic_state1 = ca.MX.sym('state_1', 2)
-symbolic_state3 = ca.MX.sym('state_3', 2)
-initial_states3 = {1: np.array([0, 0]), 3: np.array([0, 2])}
-
+# ============ Task 3 =====================================================================================================
 edge_13    = task_graph[1][3]["container"]
-predicate = formation_predicate(epsilon=0.1, position_i = symbolic_state3, position_j = symbolic_state1, agents = np.array([1, 3]),  relative_pos=np.array([1,-1])) # relative_pos is the added coord of the robot you want to follow
+predicate = formation_predicate(epsilon=0.1, agent_i = robot_3, agent_j = robot_1, relative_pos=np.array([1,-1])) 
 always    = EventuallyOperator(time_interval=TimeInterval(a=20,b=30)) 
 task      = StlTask(predicate=predicate,temporal_operator=always)
+barriers[3] = create_barrier_from_task(task=task, initial_conditions=[robot_1, robot_3], alpha_function=alpha_fun)
 edge_13.add_tasks(task)
+# =========================================================================================================================
 
-scale_factor = 3
-dummy_scalar = ca.MX.sym('dummy_scalar', 1)
-alpha_fun = ca.Function('alpha_fun', [dummy_scalar], [scale_factor * dummy_scalar])
 
-barrier3 = create_barrier_from_task(task=task, initial_conditions=initial_states3, alpha_function=alpha_fun)
-# ====================================
+# # ============ Task 1.5 =====================================================================================================
+# edge_barriers = []
 
-# Store the barriers in a dictionary
-barriers = {}
-barriers[1] = barrier1
-barriers[2] = barrier2
-barriers[3] = barrier3
+# edge_1    = task_graph[1][1]["container"]
+# predicate1 = go_to_goal_predicate_2d(goal=np.array([-3, 0]), epsilon=0.8, agent=robot_1)
+# always1 = AlwaysOperator(time_interval=TimeInterval(a=10, b=25))
+# task1 = StlTask(predicate=predicate1, temporal_operator=always1)
+# edge_barriers.append(create_barrier_from_task(task=task1, initial_conditions=[robot_1], alpha_function=alpha_fun))
+
+# predicate2 = go_to_goal_predicate_2d(goal=np.array([6, 1]), epsilon=0.1, agent=robot_1)
+# always2 = AlwaysOperator(time_interval=TimeInterval(a=40, b=55))
+# task2 = StlTask(predicate=predicate2, temporal_operator=always2)
+# edge_barriers.append(create_barrier_from_task(task=task2, initial_conditions=[robot_1], alpha_function=alpha_fun))
+
+# conjoined_barrier = conjunction_of_barriers(*edge_barriers, associated_alpha_function=alpha_fun)
+# barriers[1] = conjoined_barrier
+# edge_1.add_tasks(task1)
+# edge_1.add_tasks(task2)
+# # =========================================================================================================================
 
 
 # fig,ax = plt.subplots(2,1)
-
 # nx.draw(comm_graph, with_labels=True, font_weight='bold',ax=ax[0])
 # ax[0].set_title("Communication Graph")
 # nx.draw(task_graph, with_labels=True, font_weight='bold',ax=ax[1])

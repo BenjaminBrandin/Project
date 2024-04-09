@@ -594,6 +594,93 @@ def formation_predicate(epsilon:float, agent_i:Robot, agent_j:Robot, relative_po
     return PredicateFunction(function=predicate)
 
 
+def conjunction_of_barriers(*args:BarrierFunction,associated_alpha_function:ca.Function=None)-> BarrierFunction :
+    """
+    Function to compute the conjunction of barrier functions. The function takes a variable number of barrier functions as input and returns a new barrier function that is the conjunction of the input barrier functions.
+    
+    Args:
+        *args (BarrierFunction): Variable number of barrier functions.
+    
+    Returns:
+        BarrierFunction: The barrier function representing the conjunction of the input barrier functions.
+        
+    Example :
+    >>> b1 = BarrierFunction(...)
+    >>> b2 = BarrierFunction(...)
+    >>> b3 = BarrierFunction(...)
+    >>> b4 = conjunction_of_barriers(b1,b2,b3)
+    """
+    
+    # check if the input is a list of barrier functions
+    for arg in args:
+        if not isinstance(arg, BarrierFunction):
+            raise TypeError("All the input arguments must be BarrierFunction objects.")
+    
+    # check that function is a scalar function
+    if associated_alpha_function != None :
+        if not isinstance(associated_alpha_function,ca.Function) :
+            raise ValueError("The associated alpha function must be a casadi function")
+        if associated_alpha_function.n_in() != 1 :
+            raise ValueError("The associated alpha function must be a scalar function of one variable")
+        if not  associated_alpha_function.size1_in(0) == 1 :
+            raise ValueError("The associated alpha function must be a scalar function of one variable")
+        
+    
+    contributing_agents = set()
+    for barrier in args:
+        contributing_agents.update(barrier.contributing_agents)
+        
+    # the barriers are all functions of some agents state and time. So we create such variables   minimum_approximation -> -1/eta log(sum -eta * barrier_i)
+    inputs = {}
+    
+    for agent_id in contributing_agents :
+        inputs["state_"+str(agent_id)] = ca.MX.sym("state_"+str(agent_id),barrier.function.size1_in("state_"+str(agent_id)))
+    
+    inputs["time"] = ca.MX.sym("time",1)
+    dummy = ca.MX.sym("dummy",1)
+    
+    # each barrier function has an associates switch function. This function is equal to 1 if the barrier is active and 0 otherwise
+    # we then use this function to create another switch. This switch is used to remove the barrier from the minimum
+    # create at the conjunction. Namely, the switch sets the barrier to infinity when the barrier is not needed anymore.
+    
+    inf_switch = ca.Function("inf_switch",[dummy],[ca.if_else(dummy==1.,1.,10**20)]) 
+    sum_switch = 0 # sum of the switches will be the final switch. namely, it will be zero when all the switches are zero
+    
+    
+    min_list = []
+    sum = 0
+    eta = 10
+    
+    
+    for barrier in args :
+        # gather the inputs for this barrier
+        barrier_inputs = {}
+        switch : ca.Function = barrier.switch_function
+        
+        for agent_id in barrier.contributing_agents :
+            barrier_inputs["state_"+str(agent_id)] = inputs["state_"+str(agent_id)] # gather the inputs for this barrier
+        barrier_inputs["time"] = inputs["time"] 
+        sum_switch += switch(dummy) 
+        
+        
+        sum += ca.exp(-eta*barrier.function.call(barrier_inputs)["value"]) # sum of the exponentials
+        
+        min_list.append(  barrier.function.call(barrier_inputs)["value"] + inf_switch(switch(barrier_inputs["time"]))  )
+    
+    
+    #create the final switch function
+    final_switch = ca.Function("final_switch",[dummy],[ca.if_else(sum_switch>=1,1,0)]) # the final switch is the switch that is zero when all the switches are zero
+    
+    # smooth min
+    # conjunction_barrier = -1/eta*ca.log(sum) # the smooth minimum of the barriers
+    # real min
+    conjunction_barrier = ca.mmin(ca.vertcat(*min_list)) # the barrier function is the minimum of the barriers
+    
+    b = ca.Function("conjunction_barrier",list(inputs.values()),[conjunction_barrier],list(inputs.keys()),["value"]) # Now we can have conjunctions of formulas
+    
+    return BarrierFunction(function=b,associated_alpha_function=associated_alpha_function,switch_function=final_switch)
+
+
 def create_barrier_from_task(task:StlTask, initial_conditions:List[Robot], alpha_function:ca.Function = None, t_init:float = 0) -> BarrierFunction:
     """
     Creates a barrier function from a given STLtask in the form of b(x,t) = mu(x) + gamma(t-t_init) 

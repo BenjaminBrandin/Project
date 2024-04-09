@@ -4,18 +4,18 @@ import casadi as ca
 from builders import *
 
 
-# Creating the robots
-robot_1 = Robot(id=1, initial_state=np.array([0, 0]))
-robot_2 = Robot(id=2, initial_state=np.array([0, -2]))
-robot_3 = Robot(id=3, initial_state=np.array([0, 2]))
+# Creating the dictionary that will store the barriers
+barriers = {}
 
 # Creating the alpha function that is the same for all the tasks for now
 scale_factor = 3
 dummy_scalar = ca.MX.sym('dummy_scalar', 1)
 alpha_fun = ca.Function('alpha_fun', [dummy_scalar], [scale_factor * dummy_scalar])
 
-# Creating the dictionary that will store the barriers
-barriers = {}
+# Creating the robots
+robot_1 = Robot(id=1, initial_state=np.array([0, 0]))
+robot_2 = Robot(id=2, initial_state=np.array([0, -2]))
+robot_3 = Robot(id=3, initial_state=np.array([0, 2]))
 
 
 # ============ Task 1 =====================================================================================================
