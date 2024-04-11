@@ -594,7 +594,7 @@ def formation_predicate(epsilon:float, agent_i:Robot, agent_j:Robot, relative_po
     return PredicateFunction(function=predicate)
 
 
-def conjunction_of_barriers(*args:BarrierFunction,associated_alpha_function:ca.Function=None)-> BarrierFunction :
+def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha_function:ca.Function=None)-> BarrierFunction :
     """
     Function to compute the conjunction of barrier functions. The function takes a variable number of barrier functions as input and returns a new barrier function that is the conjunction of the input barrier functions.
     
@@ -612,7 +612,7 @@ def conjunction_of_barriers(*args:BarrierFunction,associated_alpha_function:ca.F
     """
     
     # check if the input is a list of barrier functions
-    for arg in args:
+    for arg in barrier_list:
         if not isinstance(arg, BarrierFunction):
             raise TypeError("All the input arguments must be BarrierFunction objects.")
     
@@ -627,7 +627,7 @@ def conjunction_of_barriers(*args:BarrierFunction,associated_alpha_function:ca.F
         
     
     contributing_agents = set()
-    for barrier in args:
+    for barrier in barrier_list:
         contributing_agents.update(barrier.contributing_agents)
         
     # the barriers are all functions of some agents state and time. So we create such variables   minimum_approximation -> -1/eta log(sum -eta * barrier_i)
@@ -652,7 +652,7 @@ def conjunction_of_barriers(*args:BarrierFunction,associated_alpha_function:ca.F
     eta = 10
     
     
-    for barrier in args :
+    for barrier in barrier_list:
         # gather the inputs for this barrier
         barrier_inputs = {}
         switch : ca.Function = barrier.switch_function

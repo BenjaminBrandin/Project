@@ -10,6 +10,7 @@ from graph_module import create_communication_graph_from_states, create_task_gra
 # Parameters
 barriers = {}
 initial_states = {}
+edge_barriers = []
 scale_factor = 3
 communication_radius = 3.0
 
@@ -34,13 +35,22 @@ dummy_scalar = ca.MX.sym('dummy_scalar', 1)
 alpha_fun = ca.Function('alpha_fun', [dummy_scalar], [scale_factor * dummy_scalar])
 
 
-# ============ Task 1 =====================================================================================================
+# ============ Task 1 ====================================================================================================
 edge_1    = task_graph[1][1]["container"]
-predicate = go_to_goal_predicate_2d(goal=np.array([6, 1]), epsilon=0.1, agent=robot_1)
+predicate = go_to_goal_predicate_2d(goal=np.array([6, 0]), epsilon=0.1, agent=robot_1)
+always = AlwaysOperator(time_interval=TimeInterval(a=10, b=25))
+task = StlTask(predicate=predicate, temporal_operator=always)
+edge_barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1], alpha_function=alpha_fun))
+edge_1.add_tasks(task)
+
+predicate = go_to_goal_predicate_2d(goal=np.array([6, 6]), epsilon=0.1, agent=robot_1)
 always = AlwaysOperator(time_interval=TimeInterval(a=40, b=55))
 task = StlTask(predicate=predicate, temporal_operator=always)
-barriers[1] = create_barrier_from_task(task=task, initial_conditions=[robot_1], alpha_function=alpha_fun)
+edge_barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1], alpha_function=alpha_fun))
 edge_1.add_tasks(task)
+
+conjoined_barrier = conjunction_of_barriers(edge_barriers, associated_alpha_function=alpha_fun)
+barriers[1] = conjoined_barrier
 # =========================================================================================================================
 
 
@@ -64,25 +74,6 @@ edge_13.add_tasks(task)
 # =========================================================================================================================
 
 
-# # ============ Task 1.5 =====================================================================================================
-# edge_barriers = []
-
-# edge_1    = task_graph[1][1]["container"]
-# predicate1 = go_to_goal_predicate_2d(goal=np.array([-3, 0]), epsilon=0.8, agent=robot_1)
-# always1 = AlwaysOperator(time_interval=TimeInterval(a=10, b=25))
-# task1 = StlTask(predicate=predicate1, temporal_operator=always1)
-# edge_barriers.append(create_barrier_from_task(task=task1, initial_conditions=[robot_1], alpha_function=alpha_fun))
-
-# predicate2 = go_to_goal_predicate_2d(goal=np.array([6, 1]), epsilon=0.1, agent=robot_1)
-# always2 = AlwaysOperator(time_interval=TimeInterval(a=40, b=55))
-# task2 = StlTask(predicate=predicate2, temporal_operator=always2)
-# edge_barriers.append(create_barrier_from_task(task=task2, initial_conditions=[robot_1], alpha_function=alpha_fun))
-
-# conjoined_barrier = conjunction_of_barriers(*edge_barriers, associated_alpha_function=alpha_fun)
-# barriers[1] = conjoined_barrier
-# edge_1.add_tasks(task1)
-# edge_1.add_tasks(task2)
-# # =========================================================================================================================
 
 
 # fig,ax = plt.subplots(2,1)

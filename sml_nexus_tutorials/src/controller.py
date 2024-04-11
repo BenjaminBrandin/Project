@@ -18,13 +18,12 @@ class Controller():
         #Initialize node
         rospy.init_node('controller')
 
-
         self.robot_pose = geometry_msgs.msg.PoseStamped()
         self.tracked_object_pose = geometry_msgs.msg.PoseStamped()
         self.last_received_pose = rospy.Time()
         vel_cmd_msg = geometry_msgs.msg.Twist()
  
-
+        # ------Find a better way to do this------
         # Get robot name from parameter server
         robot_name = rospy.get_param('~robot_name')
         robot_id = int(robot_name[-1])
@@ -37,6 +36,7 @@ class Controller():
             rospy.Subscriber("/qualisys/"+tracked_object+"/pose", geometry_msgs.msg.PoseStamped, self.tracked_object_pose_callback)
         else:
             pass
+        #  ----------------------------------------
 
         # Setup publisher
         vel_pub = rospy.Publisher("cmd_vel", geometry_msgs.msg.Twist, queue_size=100)
@@ -54,13 +54,14 @@ class Controller():
         input_values = {}
         loop_frequency = 50
         r = rospy.Rate(loop_frequency)
-        barrier = barriers[robot_id]
+        # relevant_barriers = [barrier for barrier in barriers.values() if robot_id in barrier.contributing_agents]
+        relevant_barriers = barriers[robot_id]
 
-
+        # Define the optimization problem parameters
         u_hat = ca.MX.sym('u_hat', 2)
         x_sym = ca.MX.sym('state', 2)
         t_sym = ca.MX.sym('time', 1)
-        A = ca.MX.sym('A', 1, 2)
+        A = ca.MX.sym('A', 1, 2)   
         b = ca.MX.sym('b', 1)
         Q = ca.DM_eye(2)
         
@@ -78,23 +79,27 @@ class Controller():
             
             if (t < self.last_received_pose.to_sec() + timeout):
                 
-                x = ca.vertcat(self.robot_pose.pose.position.x, self.robot_pose.pose.position.y)
+                # ------Find a better way to do this------
+                state = ca.vertcat(self.robot_pose.pose.position.x, self.robot_pose.pose.position.y)
                 input_values["time"] = t
-                input_values[f'state_{robot_id}'] = x
+                input_values[f'state_{robot_id}'] = state
 
                 if robot_name == "nexus2" or robot_name == "nexus3": 
                     input_values[f'state_{tracked_id}'] = ca.vertcat(self.tracked_object_pose.pose.position.x, self.tracked_object_pose.pose.position.y)
                 else:
                     pass
+                #  ----------------------------------------
 
-                barrier_val = barrier.function.call(input_values)['value']
-                A_val = barrier.gradient_function_wrt_state_of_agent(robot_id).call(input_values)['value'] 
-                b_val = barrier.partial_time_derivative.call(input_values)['value'] + barrier_val # Divide by the number of agents
+                barrier_val = relevant_barriers.function.call(input_values)['value']
+                A_val = relevant_barriers.gradient_function_wrt_state_of_agent(robot_id).call(input_values)['value'] 
+                b_val = (relevant_barriers.partial_time_derivative.call(input_values)['value'] + barrier_val)/(len(input_values)-1)  # Divide by the number of agents
+
+                
 
                 if np.linalg.norm(A_val) < 1e-10:
                     u_hat = ca.MX([0, 0])
                 else:
-                    param_values = ca.vertcat(x, t, A_val.T, b_val)
+                    param_values = ca.vertcat(state, t, A_val.T, b_val) # might need the other agents' states
                     u_opt = qpsolver(lbg=0, p=param_values)
                     u_hat = u_opt['x']
 
