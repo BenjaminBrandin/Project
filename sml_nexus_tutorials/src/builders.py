@@ -558,22 +558,7 @@ def formation_predicate(epsilon:float, agent_i:Robot, agent_j:Robot, relative_po
     
     Returns:
         PredicateFunction : the predicate function 
-        
-    
-    Example:
-    >>> car_1 = DifferentialDrive(...)
-    >>> car_2 = DifferentialDrive(...)
-    >>> epsilon = 0.1
-    >>> closeness_predicate = epsilon_position_closeness_predicate(epsilon,car_1,car_2)
-    
     """
-
-    # try :
-    #     position_i = model_agent_i.substates_dict[StateName.POSITION2D] #extract the required 2d position
-    #     position_j = model_agent_j.substates_dict[StateName.POSITION2D] 
-    # except :
-    #     raise ValueError("The given dynamical models do not have a 2D position as a substate. The epsilon closeness predicate can only be applied to models with a 2D position as a substate")
-    
 
     if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
         raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")

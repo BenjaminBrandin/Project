@@ -2,13 +2,15 @@
 import sys
 import rospy
 import copy
+# from builders import *
+# from typing import List
 import casadi as ca
+import casadi.tools as ca_tools
 import numpy as np
 import geometry_msgs.msg
 import tf2_ros
 import tf2_geometry_msgs
 from tf.transformations import euler_from_quaternion
-# from simulation import barriers
 from simulation_graph import barriers
  
 
@@ -21,105 +23,122 @@ class Controller():
         self.robot_pose = geometry_msgs.msg.PoseStamped()
         self.tracked_object_pose = geometry_msgs.msg.PoseStamped()
         self.last_received_pose = rospy.Time()
-        vel_cmd_msg = geometry_msgs.msg.Twist()
- 
-        # ------Find a better way to do this------
-        # Get robot name from parameter server
-        robot_name = rospy.get_param('~robot_name')
-        robot_id = int(robot_name[-1])
-        rospy.Subscriber("/qualisys/"+robot_name+"/pose", geometry_msgs.msg.PoseStamped, self.pose_callback)
+        self.vel_cmd_msg = geometry_msgs.msg.Twist()
+        self.parameters = ca_tools.structure3.msymStruct = None
+        # self.relevant_barriers = [barrier for barrier in barriers.values() if self.robot_id in barrier.contributing_agents]
+        self.solver = ca.Function = None
+        self.robot_name = rospy.get_param('~robot_name')
+        self.robot_id = int(self.robot_name[-1])
+        self.relevant_barriers = barriers[self.robot_id]
+        
 
-        # Get tracked object name from parameter server
-        if robot_name == "nexus2" or robot_name == "nexus3":
+
+        rospy.Subscriber("/qualisys/"+self.robot_name+"/pose", geometry_msgs.msg.PoseStamped, self.pose_callback)
+        if self.robot_name in ["nexus2", "nexus3"]:
             tracked_object = rospy.get_param('~tracked_object')
-            tracked_id = int(tracked_object[-1])
+            self.tracked_id = int(tracked_object[-1])
             rospy.Subscriber("/qualisys/"+tracked_object+"/pose", geometry_msgs.msg.PoseStamped, self.tracked_object_pose_callback)
-        else:
-            pass
-        #  ----------------------------------------
 
         # Setup publisher
-        vel_pub = rospy.Publisher("cmd_vel", geometry_msgs.msg.Twist, queue_size=100)
+        self.vel_pub = rospy.Publisher("cmd_vel", geometry_msgs.msg.Twist, queue_size=100)
 
 
         #Setup transform subscriber
-        tf_buffer = tf2_ros.Buffer()
-        tf_listener = tf2_ros.TransformListener(tf_buffer)
-        while not tf_buffer.can_transform('mocap', robot_name, rospy.Time()):
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
+        while not self.tf_buffer.can_transform('mocap', self.robot_name, rospy.Time()):
             rospy.loginfo("Wait for transform to be available")
             rospy.sleep(1)
 
+        self.solver = self.set_up_optimization_problem()
+        self.control_loop()
 
+
+
+    
+
+    def set_up_optimization_problem(self):
+        self.input_vector = ca.MX.sym('input', 2)
+        self.Q = ca.DM_eye(2)
+
+        parameter_list = []
+        parameter_list += [ca_tools.entry(f"state_{self.robot_id}", shape=2)]
+        parameter_list += [ca_tools.entry(f"state_{id}", shape=2) for id in barriers.keys() if id != self.robot_id]
+        parameter_list += [ca_tools.entry("time", shape=1)]
+        parameter_list += [ca_tools.entry("A", shape=(1,2))]
+        parameter_list += [ca_tools.entry("b", shape=1)]
+        
+        self.parameters = ca_tools.struct_symMX(parameter_list)
+
+        constraint = self.parameters["A"] @ self.input_vector + self.parameters["b"] 
+        objective = self.input_vector.T @ self.Q @ self.input_vector
+
+
+        qp = {'x': self.input_vector, 'f': objective, 'g': constraint, 'p': self.parameters}
+        opts = {'printLevel': 'none'}
+        self.qpsolver = ca.qpsol('sol', 'qpoases', qp, opts)
+
+        return self.qpsolver
+
+
+
+    def control_loop(self):
         timeout = 0.5
         input_values = {}
         loop_frequency = 50
         r = rospy.Rate(loop_frequency)
-        # relevant_barriers = [barrier for barrier in barriers.values() if robot_id in barrier.contributing_agents]
-        relevant_barriers = barriers[robot_id]
-
-        # Define the optimization problem parameters
-        u_hat = ca.MX.sym('u_hat', 2)
-        x_sym = ca.MX.sym('state', 2)
-        t_sym = ca.MX.sym('time', 1)
-        A = ca.MX.sym('A', 1, 2)   
-        b = ca.MX.sym('b', 1)
-        Q = ca.DM_eye(2)
-        
-        constraint = A @ u_hat + b 
-        objective = u_hat.T @ Q @ u_hat
-        params = ca.vertcat(x_sym, t_sym, A.T, b)
-        qp = {'x': u_hat, 'f': objective, 'g': constraint, 'p': params}
-        opts = {'printLevel': 'none'}
-        qpsolver = ca.qpsol('u_opt', 'qpoases', qp, opts)
-        
 
         while not rospy.is_shutdown():
-
+            current_parameters = self.parameters(0)
             t  = rospy.Time.now().to_sec()
+            current_parameters["time"] = t
             
             if (t < self.last_received_pose.to_sec() + timeout):
                 
                 # ------Find a better way to do this------
                 state = ca.vertcat(self.robot_pose.pose.position.x, self.robot_pose.pose.position.y)
+                current_parameters[f'state_{self.robot_id}'] = state
                 input_values["time"] = t
-                input_values[f'state_{robot_id}'] = state
+                input_values[f'state_{self.robot_id}'] = state
 
-                if robot_name == "nexus2" or robot_name == "nexus3": 
-                    input_values[f'state_{tracked_id}'] = ca.vertcat(self.tracked_object_pose.pose.position.x, self.tracked_object_pose.pose.position.y)
+                if self.robot_name in ["nexus2", "nexus3"]:
+                    tracked_state = ca.vertcat(self.tracked_object_pose.pose.position.x, self.tracked_object_pose.pose.position.y)
+                    input_values[f'state_{self.tracked_id}'] = tracked_state
+                    current_parameters[f'state_{self.tracked_id}'] = tracked_state
                 else:
                     pass
                 #  ----------------------------------------
 
-                barrier_val = relevant_barriers.function.call(input_values)['value']
-                A_val = relevant_barriers.gradient_function_wrt_state_of_agent(robot_id).call(input_values)['value'] 
-                b_val = (relevant_barriers.partial_time_derivative.call(input_values)['value'] + barrier_val)/(len(input_values)-1)  # Divide by the number of agents
-
+                barrier_val = self.relevant_barriers.function.call(input_values)['value']
+                A_val = self.relevant_barriers.gradient_function_wrt_state_of_agent(self.robot_id).call(input_values)['value'] 
+                b_val = (self.relevant_barriers.partial_time_derivative.call(input_values)['value'] + barrier_val)/(len(input_values)-1)  # Divide by the number of agents
+                current_parameters["A"] = A_val
+                current_parameters["b"] = b_val
                 
 
                 if np.linalg.norm(A_val) < 1e-10:
-                    u_hat = ca.MX([0, 0])
+                    input = ca.MX([0, 0])
                 else:
-                    param_values = ca.vertcat(state, t, A_val.T, b_val) # might need the other agents' states
-                    u_opt = qpsolver(lbg=0, p=param_values)
-                    u_hat = u_opt['x']
+                    sol = self.solver(p=current_parameters, lbg=0)
+                    input = sol['x']
 
-                vel_cmd_msg.linear.x = u_hat[0]
-                vel_cmd_msg.linear.y = u_hat[1]        
+                self.vel_cmd_msg.linear.x = input[0]
+                self.vel_cmd_msg.linear.y = input[1]        
             else:
-                vel_cmd_msg.linear.x = 0
-                vel_cmd_msg.linear.y = 0
+                self.vel_cmd_msg.linear.x = 0
+                self.vel_cmd_msg.linear.y = 0
             
             try:
                 # Get transform from mocap frame to robot frame
-                transform = tf_buffer.lookup_transform('mocap', robot_name, rospy.Time())
-                vel_cmd_msg_transformed = transform_twist(vel_cmd_msg, transform)
-                vel_pub.publish(vel_cmd_msg_transformed)
+                transform = self.tf_buffer.lookup_transform('mocap', self.robot_name, rospy.Time())
+                vel_cmd_msg_transformed = transform_twist(self.vel_cmd_msg, transform)
+                self.vel_pub.publish(vel_cmd_msg_transformed)
             except:
                 continue
 
             r.sleep()
 
-
+    
     def pose_callback(self, pose_stamped_msg):
         self.robot_pose = pose_stamped_msg
         self.last_received_pose = rospy.Time.now()
