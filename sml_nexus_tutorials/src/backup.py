@@ -62,6 +62,7 @@ class Controller():
         parameter_list += [ca_tools.entry(f"state_{self.robot_id}", shape=2)]
         parameter_list += [ca_tools.entry(f"state_{id}", shape=2) for id in barriers.keys() if id != self.robot_id]
         parameter_list += [ca_tools.entry("time", shape=1)]
+        # Initialization failed since variables [A, b] are free. These symbols occur in the output expressions but you forgot to declare these as inputs.
         parameter_list += [ca_tools.entry("A", shape=(1,2))]
         parameter_list += [ca_tools.entry("b", shape=1)]
         

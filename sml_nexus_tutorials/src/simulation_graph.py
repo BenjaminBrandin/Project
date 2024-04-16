@@ -40,17 +40,8 @@ edge_1    = task_graph[1][1]["container"]
 predicate = go_to_goal_predicate_2d(goal=np.array([6, 0]), epsilon=0.1, agent=robot_1)
 always = AlwaysOperator(time_interval=TimeInterval(a=10, b=25))
 task = StlTask(predicate=predicate, temporal_operator=always)
-edge_barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1], alpha_function=alpha_fun))
+barriers[1] = create_barrier_from_task(task=task, initial_conditions=[robot_1], alpha_function=alpha_fun)
 edge_1.add_tasks(task)
-
-predicate = go_to_goal_predicate_2d(goal=np.array([6, 6]), epsilon=0.1, agent=robot_1)
-always = AlwaysOperator(time_interval=TimeInterval(a=40, b=55))
-task = StlTask(predicate=predicate, temporal_operator=always)
-edge_barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1], alpha_function=alpha_fun))
-edge_1.add_tasks(task)
-
-conjoined_barrier = conjunction_of_barriers(edge_barriers, associated_alpha_function=alpha_fun)
-barriers[1] = conjoined_barrier
 # =========================================================================================================================
 
 
