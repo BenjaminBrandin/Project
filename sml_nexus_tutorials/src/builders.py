@@ -92,7 +92,7 @@ def get_id_from_input_name(input_name: str) -> UniqueIdentifier:
     return ids   
 
 # ============ Move class to a better place =================
-class Robot:
+class Agent:
     def __init__(self, id: int, initial_state: np.ndarray):
         self.id = id
         self.symbolic_state = ca.MX.sym(f'state_{id}', 2)
@@ -205,7 +205,7 @@ class BarrierFunction:
     def time_function(self):
         return self._time_function
 
-    def gradient_function_wrt_state_of_agent(self,agent_id:UniqueIdentifier) -> ca.Function:
+    def gradient_function_wrt_state_of_agent(self,agent_id) -> ca.Function:
         try :
             return self._gradient_function_wrt[agent_id]
         except KeyError :
@@ -483,7 +483,7 @@ class StlTask :
     
 
 
-def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, agent:Robot) ->PredicateFunction:
+def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, agent:Agent) ->PredicateFunction:
     
     # try :
     #     position1 = model_agent.substates_dict[StateName.POSITION2D] #extract the required 2d position
@@ -508,7 +508,7 @@ def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, agent:Robot) ->Predi
     return PredicateFunction(function=predicate)
 
 
-def epsilon_position_closeness_predicate(epsilon:float, agent_i:Robot, agent_j:Robot) ->PredicateFunction: # Does not need to be called state_1 and state_2
+def epsilon_position_closeness_predicate(epsilon:float, agent_i:Agent, agent_j:Agent) ->PredicateFunction: # Does not need to be called state_1 and state_2
     """
     Helper function to create a closeness relation predicate in the form ||position1-position2|| <= epsilon.
     This predicate is useful to dictate some closeness relation among two agents for example. The helper function can only be applied of 
@@ -545,7 +545,7 @@ def epsilon_position_closeness_predicate(epsilon:float, agent_i:Robot, agent_j:R
     return PredicateFunction(function=predicate)
 
 
-def formation_predicate(epsilon:float, agent_i:Robot, agent_j:Robot, relative_pos:np.ndarray, direction_i_to_j:bool=True) ->PredicateFunction:
+def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_pos:np.ndarray, direction_i_to_j:bool=True) ->PredicateFunction:
     """
     Helper function to create a closeness relation predicate witha  certain relative position vector. in the form ||position1-position2|| <= epsilon.
     This predicate is useful to dictate some closeness relation among two agents for example. The helper function can only be applied of 
@@ -666,7 +666,7 @@ def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha
     return BarrierFunction(function=b,associated_alpha_function=associated_alpha_function,switch_function=final_switch)
 
 
-def create_barrier_from_task(task:StlTask, initial_conditions:List[Robot], alpha_function:ca.Function = None, t_init:float = 0) -> BarrierFunction:
+def create_barrier_from_task(task:StlTask, initial_conditions:List[Agent], alpha_function:ca.Function = None, t_init:float = 0) -> BarrierFunction:
     """
     Creates a barrier function from a given STLtask in the form of b(x,t) = mu(x) + gamma(t-t_init) 
     where mu(x) is the predicate and gamma(t) is a suitably defined time function 

@@ -119,6 +119,8 @@ class Controller():
                 else:
                     sol = self.solver(p=current_parameters, lbg=0)
                     input = sol['x']
+                    const = sol['g']
+                    rospy.loginfo(f"Constraint: {const}")
 
                 self.vel_cmd_msg.linear.x = input[0]
                 self.vel_cmd_msg.linear.y = input[1]        

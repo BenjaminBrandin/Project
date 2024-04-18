@@ -33,7 +33,6 @@
       <!-- Controller node -->
     <node name="controller" pkg="sml_nexus_tutorials" type="controller.py" output="screen" >
       <param name="robot_name" value="nexus2"/>
-      <param name="tracked_object" value="nexus1"/>
     </node>
   </group>
 
@@ -46,7 +45,6 @@
       <!-- Controller node -->
     <node name="controller" pkg="sml_nexus_tutorials" type="controller.py" output="screen" >
       <param name="robot_name" value="nexus3"/>
-      <param name="tracked_object" value="nexus1"/>
     </node>
   </group>
 

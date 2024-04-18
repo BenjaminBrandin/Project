@@ -163,3 +163,30 @@ if __name__ == "__main__":
     except rospy.ROSInterruptException:
         print("Shutting down")
         sys.exit(0)
+
+
+
+
+        # if self.start_sol.size != 0    :
+        #         try :
+        #             sol = self.solver( x0 = self.start_sol,p = self.parameters, ubg = 0)
+        #             self._warm_start_sol = sol['x'] # this is saved for warm starting the next optimization problem
+
+        #         except Exception as e1:
+        #             print(f"Agent {self.agent_id} Primary Controller Failed !")
+        #             self._logger.error(f"Primary controller failed with the following message")
+        #             self._logger.error(e1, exc_info=True)
+        #             raise e1
+                    
+        #     else :
+        #         try :
+        #             sol = self.solver(p = self.parameters, ubg = 0)
+        #             self.start_sol = sol['x'] # this is saved for warm starting the next optimization problem
+                    
+        #         except Exception as e1:
+        #             print(f"Agent {self.agent_id} Primary Controller Failed !")
+        #             self._logger.error(f"Primary controller failed with the following message")
+        #             self._logger.error(e1, exc_info=True)
+        #             raise e1
+                    
+        #     optimal_input  = sol['x']
