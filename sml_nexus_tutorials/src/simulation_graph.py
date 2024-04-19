@@ -39,7 +39,7 @@ alpha_fun = ca.Function('alpha_fun', [dummy_scalar], [scale_factor * dummy_scala
 
 # ============ Task 1 ====================================================================================================
 edge_1 = task_graph[1][1]["container"]
-predicate = go_to_goal_predicate_2d(goal=np.array([8, 0]), epsilon=2, agent=robot_1)
+predicate = go_to_goal_predicate_2d(goal=np.array([6, 2]), epsilon=3, agent=robot_1)
 temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=20, b=50))
 task = StlTask(predicate=predicate, temporal_operator=temporal_operator)
 barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1], alpha_function=alpha_fun)) 
@@ -49,8 +49,8 @@ edge_1.add_tasks(task)
 
 # ============ Task 2 =====================================================================================================
 edge_12 = task_graph[1][2]["container"]
-predicate = formation_predicate(epsilon=2, agent_i = robot_1, agent_j = robot_2, relative_pos=np.array([-1,-2]))
-temporal_operator = EventuallyOperator(time_interval=TimeInterval(a=20,b=30)) 
+predicate = formation_predicate(epsilon=2, agent_i = robot_1, agent_j = robot_2, relative_pos=np.array([-1,-1]))
+temporal_operator = EventuallyOperator(time_interval=TimeInterval(a=30,b=40)) 
 task = StlTask(predicate=predicate,temporal_operator=temporal_operator)
 barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1, robot_2], alpha_function=alpha_fun)) 
 edge_12.add_tasks(task)
@@ -59,11 +59,21 @@ edge_12.add_tasks(task)
 
 # # ============ Task 3 =====================================================================================================
 # edge_13 = task_graph[1][3]["container"]
-# predicate = formation_predicate(epsilon=1, agent_i = robot_1, agent_j = robot_3, relative_pos=np.array([-1,1])) 
-# temporal_operator = EventuallyOperator(time_interval=TimeInterval(a=20,b=30)) 
+# predicate = formation_predicate(epsilon=2, agent_i = robot_1, agent_j = robot_3, relative_pos=np.array([-1,1])) 
+# temporal_operator = EventuallyOperator(time_interval=TimeInterval(a=30,b=40)) 
 # task = StlTask(predicate=predicate,temporal_operator=temporal_operator)
 # barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1, robot_3], alpha_function=alpha_fun))
 # edge_13.add_tasks(task)
+# # =========================================================================================================================
+
+
+# # ============ Task 1 ====================================================================================================
+# edge_2 = task_graph[2][2]["container"]
+# predicate = go_to_goal_predicate_2d(goal=np.array([6, 0]), epsilon=3, agent=robot_2)
+# temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=20, b=50))
+# task = StlTask(predicate=predicate, temporal_operator=temporal_operator)
+# barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_2], alpha_function=alpha_fun)) 
+# edge_2.add_tasks(task)
 # # =========================================================================================================================
 
 
