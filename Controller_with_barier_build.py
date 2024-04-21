@@ -2,16 +2,18 @@
 import sys
 import rospy
 import copy
-from builders import BarrierFunction
+from builders import BarrierFunction, Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, go_to_goal_predicate_2d, formation_predicate, create_barrier_from_task
+from graph_module import create_communication_graph_from_states, create_task_graph_from_edges
 from typing import List, Dict
 import casadi as ca
 import casadi.tools as ca_tools
 import numpy as np
+from std_msgs.msg import String
 from geometry_msgs.msg import Twist, PoseStamped, TransformStamped, Vector3Stamped
 import tf2_ros
 import tf2_geometry_msgs
 from tf.transformations import euler_from_quaternion
-from simulation_graph import barriers, initial_states
+# from simulation_graph import barriers, initial_states
 
 class Controller():
 
@@ -24,7 +26,7 @@ class Controller():
         self.solver = None
         self.Q = ca.DM_eye(2)
         self.parameters = None
-        self.barriers = barriers
+        self.barriers = []
         self.barrier_constraints = None
         self.input_vector = ca.MX.sym('input', 2)
         
@@ -35,13 +37,14 @@ class Controller():
         self.last_received_pose = rospy.Time()
 
         # Neighbouring Agents
-        self.initial_states = initial_states
-        self.agents = list(self.initial_states.keys())
+        self.initial_states = {}
+        self.agents = []
         self.neighbour_agents = {}
         
         # Velocity Command Message
         self.vel_cmd_msg = Twist()
 
+    
         # Setup subscribers
         rospy.Subscriber("/qualisys/"+self.agent_name+"/pose", PoseStamped, self.pose_callback)
 
@@ -62,8 +65,61 @@ class Controller():
             rospy.loginfo("Wait for transform to be available")
             rospy.sleep(1)
 
+        self.barriers, self.initial_states = self.set_up_graphs_and_barriers()
+        self.agents = list(self.initial_states.keys()) 
         self.solver = self.set_up_optimization_problem()
         self.control_loop()
+
+
+    def set_up_graphs_and_barriers(self):
+        barriers = []
+        initial_states = {}
+        edge_barriers = []
+        scale_factor = 3
+        communication_radius = 3.0
+
+        # Initial states of the robots 
+        state1 = np.array([0,0]) 
+        state2 = np.array([0,-2])    
+        state3 = np.array([0,2])     
+        # initial_states = {1:state1,2:state2,3:state3}
+        initial_states = {1:state1,2:state2}
+         
+
+        # Creating the robots
+        robot_1 = Agent(id=1, initial_state=state1)
+        robot_2 = Agent(id=2, initial_state=state2)
+        robot_3 = Agent(id=3, initial_state=state3)
+
+        # Creating the graphs
+        # task_edges = [(1,1),(1,2),(1,3)]
+        task_edges = [(1,1),(1,2)]
+        task_graph = create_task_graph_from_edges(edge_list = task_edges) # creates an empty task graph
+        comm_graph = create_communication_graph_from_states(initial_states,communication_radius)
+
+        # Creating the alpha function that is the same for all the tasks for now
+        dummy_scalar = ca.MX.sym('dummy_scalar', 1)
+        alpha_fun = ca.Function('alpha_fun', [dummy_scalar], [scale_factor * dummy_scalar])
+
+        # ============ Task 1 ====================================================================================================
+        edge_1 = task_graph[1][1]["container"]
+        predicate = go_to_goal_predicate_2d(goal=np.array([6, 2]), epsilon=3, agent=robot_1)
+        temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=20, b=50))
+        task = StlTask(predicate=predicate, temporal_operator=temporal_operator)
+        barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1], alpha_function=alpha_fun)) 
+        edge_1.add_tasks(task)
+        # =========================================================================================================================
+
+
+        # ============ Task 2 =====================================================================================================
+        edge_12 = task_graph[1][2]["container"]
+        predicate = formation_predicate(epsilon=2, agent_i = robot_1, agent_j = robot_2, relative_pos=np.array([-1,-1]))
+        temporal_operator = EventuallyOperator(time_interval=TimeInterval(a=30,b=40)) 
+        task = StlTask(predicate=predicate,temporal_operator=temporal_operator)
+        barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1, robot_2], alpha_function=alpha_fun)) 
+        edge_12.add_tasks(task)
+        # =========================================================================================================================
+        return barriers, initial_states
 
     
     def set_up_optimization_problem(self):
@@ -88,6 +144,7 @@ class Controller():
         return self.qpsolver
 
 
+
     def generate_barrier_constraints(self, barrier_list:List[BarrierFunction]) -> ca.MX:
 
         constraints = []
@@ -110,6 +167,7 @@ class Controller():
             constraints.append(barrier_constraint) 
   
         return ca.vertcat(*constraints)
+
 
 
     def control_loop(self):
@@ -157,6 +215,7 @@ class Controller():
         
 
 
+
 def transform_twist(twist = Twist, transform_stamped = TransformStamped):
 
     transform_stamped_ = copy.deepcopy(transform_stamped)
@@ -175,7 +234,6 @@ def transform_twist(twist = Twist, transform_stamped = TransformStamped):
     new_twist.angular = out_rot.vector
 
     return new_twist
-
 
 
 

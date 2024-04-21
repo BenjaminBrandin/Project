@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
+import rospy
+import sys
+import json
 import numpy as np
 import casadi as ca
 import networkx as nx
-from builders import *
+from std_msgs.msg import String
+from builders import Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, go_to_goal_predicate_2d, formation_predicate, create_barrier_from_task
 import matplotlib.pyplot as plt
 from graph_module import create_communication_graph_from_states, create_task_graph_from_edges
 
+
+# def main():
+#     rospy.init_node("simulation_graph")
 
 # Parameters
 barriers = []
@@ -26,7 +33,7 @@ robot_1 = Agent(id=1, initial_state=state1)
 robot_2 = Agent(id=2, initial_state=state2)
 robot_3 = Agent(id=3, initial_state=state3)
 
-# Select desired edge for tasks. Add self loops if you need, because they won't be added otherwise
+# Creating the graphs
 # task_edges = [(1,1),(1,2),(1,3)]
 task_edges = [(1,1),(1,2)]
 task_graph = create_task_graph_from_edges(edge_list = task_edges) # creates an empty task graph
@@ -35,6 +42,11 @@ comm_graph = create_communication_graph_from_states(initial_states,communication
 # Creating the alpha function that is the same for all the tasks for now
 dummy_scalar = ca.MX.sym('dummy_scalar', 1)
 alpha_fun = ca.Function('alpha_fun', [dummy_scalar], [scale_factor * dummy_scalar])
+
+
+# Setup publishers and subscribers
+barrier_pub = rospy.Publisher("barrier_topic", String, queue_size=10)
+initial_states_pub = rospy.Publisher("initial_states_topic", String, queue_size=10)
 
 
 # ============ Task 1 ====================================================================================================
@@ -67,7 +79,7 @@ edge_12.add_tasks(task)
 # # =========================================================================================================================
 
 
-# # ============ Task 1 ====================================================================================================
+# # ============ Task 2 ====================================================================================================
 # edge_2 = task_graph[2][2]["container"]
 # predicate = go_to_goal_predicate_2d(goal=np.array([6, 0]), epsilon=3, agent=robot_2)
 # temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=20, b=50))
@@ -85,3 +97,14 @@ edge_12.add_tasks(task)
 # ax[1].set_title("Task Graph")
 
 # plt.show()
+
+
+#     # Publish the barriers and initial states
+#     barrier_json = json.dumps(barriers)
+#     initial_states_json = json.dumps(initial_states)
+#     barrier_pub.publish(barrier_json)
+#     initial_states_pub.publish(initial_states_json)
+
+# if __name__ == "__main__":
+#     main()
+

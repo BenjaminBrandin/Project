@@ -2,150 +2,199 @@
 import sys
 import rospy
 import copy
+from builders import BarrierFunction
+from typing import List, Dict
 import casadi as ca
+import casadi.tools as ca_tools
 import numpy as np
-import geometry_msgs.msg
+# import geometry_msgs.msg
+from geometry_msgs.msg import Twist, PoseStamped, TransformStamped, Vector3Stamped
 import tf2_ros
 import tf2_geometry_msgs
 from tf.transformations import euler_from_quaternion
-# from simulation import barriers
-from simulation_graph import barriers
+from simulation_graph import barriers, initial_states
  
 
 class Controller():
 
     def __init__(self):
-        #Initialize node
+
         rospy.init_node('test_controller')
 
-        self.robot_pose = geometry_msgs.msg.PoseStamped()
-        self.tracked_object_pose = geometry_msgs.msg.PoseStamped()
+        self.Q = ca.DM_eye(2)
+        self.solver = ca.Function = None
+        self.input_vector = ca.MX.sym('input', 2)
+        self.vel_cmd_msg = Twist()
+        self.parameters = ca_tools.structure3.msymStruct = None
+
+        self.agent_pose = PoseStamped()
+        self.agent_name = rospy.get_param('~robot_name')
+        self.agent_id = int(self.agent_name[-1])
         self.last_received_pose = rospy.Time()
-        vel_cmd_msg = geometry_msgs.msg.Twist()
 
-        # Initialize a structure line 618
- 
-        # ------Find a better way to do this------
-        # Get robot name from parameter server
-        robot_name = rospy.get_param('~robot_name')
-        robot_id = int(robot_name[-1])
-        rospy.Subscriber("/qualisys/"+robot_name+"/pose", geometry_msgs.msg.PoseStamped, self.pose_callback)
+        self.barriers = barriers
+        self.barrier_constraints: ca.MX = None
+        self.initial_states = initial_states
+        self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
+        # self.relevant_barriers = [self.barriers[self.agent_id - 1]]
 
-        # Get tracked object name from parameter server
-        if robot_name == "nexus2" or robot_name == "nexus3":
-            tracked_object = rospy.get_param('~tracked_object')
-            tracked_id = int(tracked_object[-1])
-            rospy.Subscriber("/qualisys/"+tracked_object+"/pose", geometry_msgs.msg.PoseStamped, self.tracked_object_pose_callback)
-        else:
-            pass
-        #  ----------------------------------------
+        self.agents = [agent for agent in self.initial_states.keys()]
+        self.neighbour_agents: Dict[int, PoseStamped] = {}
 
-        # Setup publisher
-        vel_pub = rospy.Publisher("cmd_vel", geometry_msgs.msg.Twist, queue_size=100)
+        self.nabla_funs = []
+        self.nabla_inputs = []
+        self.nabla = []
+        
 
+
+        # Setup subscriber for agent pose
+        rospy.Subscriber("/qualisys/"+self.agent_name+"/pose", PoseStamped, self.pose_callback)
+
+        # Setup subscribers for all other agents
+        for id in self.agents:
+            if id != self.agent_id:
+                # rospy.Subscriber(f"/qualisys/nexus{id}/pose", PoseStamped, self.other_agent_pose_callback)
+                rospy.Subscriber(f"/nexus{id}/agent_pose", PoseStamped, self.other_agent_pose_callback)
+            else:
+                continue
+
+        # Setup publisher for velocity commands and agent pose
+        self.vel_pub = rospy.Publisher("cmd_vel", Twist, queue_size=100)
+        self.agent_pose_pub = rospy.Publisher(f"agent_pose", PoseStamped, queue_size=100)
+            
 
         #Setup transform subscriber
-        tf_buffer = tf2_ros.Buffer()
-        tf_listener = tf2_ros.TransformListener(tf_buffer)
-        while not tf_buffer.can_transform('mocap', robot_name, rospy.Time()):
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
+        while not self.tf_buffer.can_transform('mocap', self.agent_name, rospy.Time()):
             rospy.loginfo("Wait for transform to be available")
             rospy.sleep(1)
 
+        self.solver = self.set_up_optimization_problem()
+        self.control_loop()
 
-        timeout = 0.5
-        input_values = {}
-        loop_frequency = 50
-        r = rospy.Rate(loop_frequency)
-        relevant_barriers = barriers[robot_id]
-        # relevant_barriers = [barrier for barrier in barriers.values() if robot_id in barrier.contributing_agents]
-        
 
-        # Define the optimization problem parameters
-        u_hat = ca.MX.sym('u_hat', 2)
-        x_sym = ca.MX.sym('state', 2)
-        t_sym = ca.MX.sym('time', 1)
-        A = ca.MX.sym('A', 1, 2)   
-        b = ca.MX.sym('b', 1)
-        Q = ca.DM_eye(2)
-        
-        constraint = A @ u_hat + b 
-        objective = u_hat.T @ Q @ u_hat
-        params = ca.vertcat(x_sym, t_sym, A.T, b)
-        qp = {'x': u_hat, 'f': objective, 'g': constraint, 'p': params}  # g will be created with the function generate_barrier_constraints line 718
+    
+    def set_up_optimization_problem(self):
+        # Create the structure for the optimization problem
+        parameter_list = []
+        parameter_list += [ca_tools.entry(f"state_{self.agent_id}", shape=2)]
+        parameter_list += [ca_tools.entry(f"state_{id}", shape=2) for id in self.agents if id != self.agent_id] 
+        parameter_list += [ca_tools.entry("time", shape=1)]
+        self.parameters = ca_tools.struct_symMX(parameter_list)
+
+        # Create the barrier constraints and the objective function
+        self.barrier_constraints, self.nabla_funs, self.nabla_inputs = self.generate_barrier_constraints(self.relevant_barriers)
+        constraint = ca.vertcat(self.barrier_constraints)
+        objective = self.input_vector.T @ self.Q @ self.input_vector
+
+        # rospy.loginfo(f"nabla_list{self.agent_id}: {self.nabla_list}")
+        # Create the optimization solver
+        qp = {'x': self.input_vector, 'f': objective, 'g': constraint, 'p': self.parameters}
         opts = {'printLevel': 'none'}
-        qpsolver = ca.qpsol('u_opt', 'qpoases', qp, opts)
-        
+        self.qpsolver = ca.qpsol('sol', 'qpoases', qp, opts)
 
+        return self.qpsolver
+
+
+
+    def generate_barrier_constraints(self, barrier_list:List[BarrierFunction]) -> ca.MX:
+
+        constraints = []
+        nabla_xi_funs = []
+        nabla_xi_inputs = []
+        for barrier in barrier_list:
+
+            named_inputs = {"state_"+str(id):self.parameters["state_"+str(id)] for id in barrier.contributing_agents}
+            named_inputs["time"] = self.parameters["time"]
+            
+            nabla_xi_fun = barrier.gradient_function_wrt_state_of_agent(self.agent_id)
+            partial_time_derivative_fun = barrier.partial_time_derivative
+            barrier_fun = barrier.function
+
+            nabla_xi = nabla_xi_fun.call(named_inputs)["value"]                                        
+            dbdt = partial_time_derivative_fun.call(named_inputs)["value"]                             
+            alpha_b = barrier.associated_alpha_function(barrier_fun.call(named_inputs)["value"])       
+
+            # Fix load sharing for different tasks
+            load_sharing = 1/len(barrier.contributing_agents)
+            barrier_constraint   = -1* ( ca.dot(nabla_xi.T, self.input_vector) + load_sharing * (dbdt + alpha_b))
+            constraints.append(barrier_constraint)
+
+            nabla_xi_funs.append(nabla_xi_fun)
+            nabla_xi_inputs.append(named_inputs)
+            
+            
+
+        return ca.vertcat(*constraints), nabla_xi_funs, nabla_xi_inputs
+
+
+
+    def control_loop(self):
+        r = rospy.Rate(50)
+        inputs_list = {}
         while not rospy.is_shutdown():
 
-            t  = rospy.Time.now().to_sec()
-            
-            if (t < self.last_received_pose.to_sec() + timeout):
-                
-                # ------Find a better way to do this------
-                state = ca.vertcat(self.robot_pose.pose.position.x, self.robot_pose.pose.position.y)
-                input_values["time"] = t
-                input_values[f'state_{robot_id}'] = state
+            # Fill the structure with the current values
+            current_parameters = self.parameters(0)
+            current_parameters["time"] = ca.vertcat(self.last_received_pose.to_sec())
+            current_parameters[f'state_{self.agent_id}'] = ca.vertcat(self.agent_pose.pose.position.x, self.agent_pose.pose.position.y)
 
-                if robot_name == "nexus2" or robot_name == "nexus3": 
-                    input_values[f'state_{tracked_id}'] = ca.vertcat(self.tracked_object_pose.pose.position.x, self.tracked_object_pose.pose.position.y)
-                else:
-                    pass
-                #  ----------------------------------------
+            for id in self.neighbour_agents.keys():
+                current_parameters[f'state_{id}'] = ca.vertcat(self.neighbour_agents[id].pose.position.x, self.neighbour_agents[id].pose.position.y)
 
-                barrier_val = relevant_barriers.function.call(input_values)['value']
-                A_val = relevant_barriers.gradient_function_wrt_state_of_agent(robot_id).call(input_values)['value'] 
-                b_val = (relevant_barriers.partial_time_derivative.call(input_values)['value'] + barrier_val)/(len(input_values)-1)  # Divide by the number of agents
+            for i, fun in enumerate(self.nabla_funs):
+                inputs_list = {key: current_parameters[key] for key in self.nabla_inputs[i].keys()}
+                self.nabla.append(fun.call(inputs_list)["value"])
 
-                
 
-                if np.linalg.norm(A_val) < 1e-10:
-                    u_hat = ca.MX([0, 0])
-                else:
-                    param_values = ca.vertcat(state, t, A_val.T, b_val) 
-                    u_opt = qpsolver(lbg=0, p=param_values) # function to solve the optimization problem that first set zero to all in the structure
-                    u_hat = u_opt['x']
-
-                vel_cmd_msg.linear.x = u_hat[0]
-                vel_cmd_msg.linear.y = u_hat[1]        
+            if any(ca.norm_2(val) < 1e-10 for val in self.nabla):
+                optimal_input = ca.MX([0, 0])
             else:
-                vel_cmd_msg.linear.x = 0
-                vel_cmd_msg.linear.y = 0
-            
+                # Solve the optimization problem and publish the velocity command 
+                sol = self.solver(p = current_parameters, ubg = 0) 
+                optimal_input  = sol['x']
+
+            self.vel_cmd_msg.linear.x = optimal_input[0]
+            self.vel_cmd_msg.linear.y = optimal_input[1]        
+
             try:
-                # Get transform from mocap frame to robot frame
-                transform = tf_buffer.lookup_transform('mocap', robot_name, rospy.Time())
-                vel_cmd_msg_transformed = transform_twist(vel_cmd_msg, transform)
-                vel_pub.publish(vel_cmd_msg_transformed)
+                # Get transform from mocap frame to agent frame
+                transform = self.tf_buffer.lookup_transform('mocap', self.agent_name, rospy.Time())
+                vel_cmd_msg_transformed = transform_twist(self.vel_cmd_msg, transform)
+                self.vel_pub.publish(vel_cmd_msg_transformed)
             except:
                 continue
 
             r.sleep()
 
 
-    def pose_callback(self, pose_stamped_msg):
-        self.robot_pose = pose_stamped_msg
+
+    def pose_callback(self, msg):
+        self.agent_pose = msg
         self.last_received_pose = rospy.Time.now()
+        self.agent_pose_pub.publish(self.agent_pose)
 
-    def tracked_object_pose_callback(self, pose_stamped_msg):
-        self.tracked_object_pose = pose_stamped_msg
-        self.last_received_tracked_pose = rospy.Time.now()
+    def other_agent_pose_callback(self, msg):
+        agent_id = int(msg._connection_header['topic'].split('/')[-2].replace('nexus', '')) 
+        self.neighbour_agents[agent_id] = msg
+        # pass
 
 
-def transform_twist(twist = geometry_msgs.msg.Twist, transform_stamped = geometry_msgs.msg.TransformStamped):
+def transform_twist(twist = Twist, transform_stamped = TransformStamped):
 
     transform_stamped_ = copy.deepcopy(transform_stamped)
     #Inverse real-part of quaternion to inverse rotation
     transform_stamped_.transform.rotation.w = - transform_stamped_.transform.rotation.w
 
-    twist_vel = geometry_msgs.msg.Vector3Stamped()
-    twist_rot = geometry_msgs.msg.Vector3Stamped()
+    twist_vel = Vector3Stamped()
+    twist_rot = Vector3Stamped()
     twist_vel.vector = twist.linear
     twist_rot.vector = twist.angular
     out_vel = tf2_geometry_msgs.do_transform_vector3(twist_vel, transform_stamped_)
     out_rot = tf2_geometry_msgs.do_transform_vector3(twist_rot, transform_stamped_)
 
-    new_twist = geometry_msgs.msg.Twist()
+    new_twist = Twist()
     new_twist.linear = out_vel.vector
     new_twist.angular = out_rot.vector
 
@@ -163,30 +212,3 @@ if __name__ == "__main__":
     except rospy.ROSInterruptException:
         print("Shutting down")
         sys.exit(0)
-
-
-
-
-        # if self.start_sol.size != 0    :
-        #         try :
-        #             sol = self.solver( x0 = self.start_sol,p = self.parameters, ubg = 0)
-        #             self._warm_start_sol = sol['x'] # this is saved for warm starting the next optimization problem
-
-        #         except Exception as e1:
-        #             print(f"Agent {self.agent_id} Primary Controller Failed !")
-        #             self._logger.error(f"Primary controller failed with the following message")
-        #             self._logger.error(e1, exc_info=True)
-        #             raise e1
-                    
-        #     else :
-        #         try :
-        #             sol = self.solver(p = self.parameters, ubg = 0)
-        #             self.start_sol = sol['x'] # this is saved for warm starting the next optimization problem
-                    
-        #         except Exception as e1:
-        #             print(f"Agent {self.agent_id} Primary Controller Failed !")
-        #             self._logger.error(f"Primary controller failed with the following message")
-        #             self._logger.error(e1, exc_info=True)
-        #             raise e1
-                    
-        #     optimal_input  = sol['x']
