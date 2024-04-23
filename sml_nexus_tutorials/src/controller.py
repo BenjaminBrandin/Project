@@ -25,8 +25,15 @@ class Controller():
         self.Q = ca.DM_eye(2)
         self.parameters = None
         self.barriers = barriers
-        self.barrier_constraints = None
+        self.barrier_constraints = []
         self.input_vector = ca.MX.sym('input', 2)
+        self.slack = 0
+
+        # nabla variables
+        self.nabla_funs = []
+        self.nabla_inputs = []
+        self.nabla_val = []
+        self.barrier_val = []
         
         # Agent Information
         self.agent_pose = PoseStamped()
@@ -41,6 +48,7 @@ class Controller():
         
         # Velocity Command Message
         self.vel_cmd_msg = Twist()
+
 
         # Setup subscribers
         rospy.Subscriber("/qualisys/"+self.agent_name+"/pose", PoseStamped, self.pose_callback)
@@ -75,10 +83,11 @@ class Controller():
         self.parameters = ca_tools.struct_symMX(parameter_list)
 
         # Create the barrier constraints and the objective function
+        # self.relevant_barriers = [self.barriers[self.agent_id-1]]
         self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
-        self.barrier_constraints = self.generate_barrier_constraints(self.relevant_barriers)
-        constraint = ca.vertcat(self.barrier_constraints)
-        objective = self.input_vector.T @ self.Q @ self.input_vector
+        self.generate_barrier_constraints(self.relevant_barriers)
+        constraint = ca.vertcat(*self.barrier_constraints)
+        objective = self.input_vector.T @ self.Q @ self.input_vector # add slack variable here
 
         # Create the optimization solver
         qp = {'x': self.input_vector, 'f': objective, 'g': constraint, 'p': self.parameters}
@@ -90,7 +99,6 @@ class Controller():
 
     def generate_barrier_constraints(self, barrier_list:List[BarrierFunction]) -> ca.MX:
 
-        constraints = []
         for barrier in barrier_list:
 
             named_inputs = {"state_"+str(id):self.parameters["state_"+str(id)] for id in barrier.contributing_agents}
@@ -106,16 +114,21 @@ class Controller():
 
             # Fix load sharing for different tasks
             load_sharing = 1/len(barrier.contributing_agents)
-            barrier_constraint   = -1* ( ca.dot(nabla_xi.T, self.input_vector) + load_sharing * (dbdt + alpha_b))
-            constraints.append(barrier_constraint) 
+            # load_sharing = 0.5
+            barrier_constraint   = -1* ( ca.dot(nabla_xi.T, self.input_vector) + load_sharing * (dbdt + alpha_b + self.slack))
+
+            self.barrier_constraints.append(barrier_constraint)
+            self.nabla_funs.append(nabla_xi_fun)
+            self.nabla_inputs.append(named_inputs)
   
-        return ca.vertcat(*constraints)
+
 
 
     def control_loop(self):
         r = rospy.Rate(50)
+        
         while not rospy.is_shutdown():
-
+            inputs_list = {}
             # Fill the structure with the current values
             current_parameters = self.parameters(0)
             current_parameters["time"] = ca.vertcat(self.last_received_pose.to_sec())
@@ -124,12 +137,29 @@ class Controller():
             for id in self.neighbour_agents.keys():
                 current_parameters[f'state_{id}'] = ca.vertcat(self.neighbour_agents[id].pose.position.x, self.neighbour_agents[id].pose.position.y)
 
-            # Might need to check the norm of the gradient matrix to see if it is zero to set optimal_input to zero 
+            self.nabla_val = []
+            self.barrier_val = []
+            for i, nabla_fun in enumerate(self.nabla_funs):
+                inputs_list = {key: current_parameters[key] for key in self.nabla_inputs[i].keys()}
+                nabla_val = nabla_fun.call(inputs_list)["value"]
+                barrier_val = self.relevant_barriers[i].function.call(inputs_list)["value"]
+
+                # self.nabla_val.append(nabla_val)
+                self.nabla_val.append(ca.norm_2(nabla_val))
+                self.barrier_val.append(barrier_val)
+
+            # rospy.loginfo(f"barrier values for agent {self.agent_id}: {self.barrier_val}")
+            rospy.loginfo(f"gradient{self.agent_id}: {self.nabla_val}")
 
             # Solve the optimization problem and publish the velocity command 
-            sol = self.solver(p = current_parameters, ubg = 0) 
-            optimal_input  = sol['x']
+            if any(ca.norm_2(val) < 0.1 for val in self.nabla_val):
+                optimal_input = ca.MX([0, 0])
+            else:
+                sol = self.solver(p = current_parameters, ubg = 0) 
+                optimal_input  = sol['x']
 
+            # sol = self.solver(p = current_parameters, ubg = 0) 
+            # optimal_input  = sol['x']
             self.vel_cmd_msg.linear.x = optimal_input[0]
             self.vel_cmd_msg.linear.y = optimal_input[1]        
 

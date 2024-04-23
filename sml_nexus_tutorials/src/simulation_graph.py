@@ -11,9 +11,6 @@ import matplotlib.pyplot as plt
 from graph_module import create_communication_graph_from_states, create_task_graph_from_edges
 
 
-# def main():
-#     rospy.init_node("simulation_graph")
-
 # Parameters
 barriers = []
 initial_states = {}
@@ -25,8 +22,8 @@ communication_radius = 3.0
 state1 = np.array([0,0]) 
 state2 = np.array([0,-2])    
 state3 = np.array([0,2])     
-# initial_states = {1:state1,2:state2,3:state3}
-initial_states = {1:state1,2:state2}
+initial_states = {1:state1,2:state2,3:state3}
+# initial_states = {1:state1,2:state2}
 
 # Creating the robots
 robot_1 = Agent(id=1, initial_state=state1)
@@ -34,8 +31,8 @@ robot_2 = Agent(id=2, initial_state=state2)
 robot_3 = Agent(id=3, initial_state=state3)
 
 # Creating the graphs
-# task_edges = [(1,1),(1,2),(1,3)]
-task_edges = [(1,1),(1,2)]
+task_edges = [(1,1),(1,2),(1,3)]
+# task_edges = [(1,1),(1,2)]
 task_graph = create_task_graph_from_edges(edge_list = task_edges) # creates an empty task graph
 comm_graph = create_communication_graph_from_states(initial_states,communication_radius)
 
@@ -51,7 +48,7 @@ initial_states_pub = rospy.Publisher("initial_states_topic", String, queue_size=
 
 # ============ Task 1 ====================================================================================================
 edge_1 = task_graph[1][1]["container"]
-predicate = go_to_goal_predicate_2d(goal=np.array([6, 2]), epsilon=3, agent=robot_1)
+predicate = go_to_goal_predicate_2d(goal=np.array([6, 0]), epsilon=1, agent=robot_1)
 temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=20, b=50))
 task = StlTask(predicate=predicate, temporal_operator=temporal_operator)
 barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1], alpha_function=alpha_fun)) 
@@ -69,14 +66,14 @@ edge_12.add_tasks(task)
 # =========================================================================================================================
 
 
-# # ============ Task 3 =====================================================================================================
-# edge_13 = task_graph[1][3]["container"]
-# predicate = formation_predicate(epsilon=2, agent_i = robot_1, agent_j = robot_3, relative_pos=np.array([-1,1])) 
-# temporal_operator = EventuallyOperator(time_interval=TimeInterval(a=30,b=40)) 
-# task = StlTask(predicate=predicate,temporal_operator=temporal_operator)
-# barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1, robot_3], alpha_function=alpha_fun))
-# edge_13.add_tasks(task)
-# # =========================================================================================================================
+# ============ Task 3 =====================================================================================================
+edge_13 = task_graph[1][3]["container"]
+predicate = formation_predicate(epsilon=2, agent_i = robot_1, agent_j = robot_3, relative_pos=np.array([-1,1])) 
+temporal_operator = EventuallyOperator(time_interval=TimeInterval(a=30,b=40)) 
+task = StlTask(predicate=predicate,temporal_operator=temporal_operator)
+barriers.append(create_barrier_from_task(task=task, initial_conditions=[robot_1, robot_3], alpha_function=alpha_fun))
+edge_13.add_tasks(task)
+# =========================================================================================================================
 
 
 # # ============ Task 2 ====================================================================================================
@@ -97,14 +94,4 @@ edge_12.add_tasks(task)
 # ax[1].set_title("Task Graph")
 
 # plt.show()
-
-
-#     # Publish the barriers and initial states
-#     barrier_json = json.dumps(barriers)
-#     initial_states_json = json.dumps(initial_states)
-#     barrier_pub.publish(barrier_json)
-#     initial_states_pub.publish(initial_states_json)
-
-# if __name__ == "__main__":
-#     main()
 

@@ -7,62 +7,59 @@ from typing import List, Dict
 import casadi as ca
 import casadi.tools as ca_tools
 import numpy as np
-# import geometry_msgs.msg
 from geometry_msgs.msg import Twist, PoseStamped, TransformStamped, Vector3Stamped
 import tf2_ros
 import tf2_geometry_msgs
 from tf.transformations import euler_from_quaternion
 from simulation_graph import barriers, initial_states
- 
 
 class Controller():
 
     def __init__(self):
 
-        rospy.init_node('test_controller')
+        # Initialize the node
+        rospy.init_node('controller')
 
+        # Optimization Problem
+        self.solver = None
         self.Q = ca.DM_eye(2)
-        self.solver = ca.Function = None
+        self.parameters = None
+        self.barriers = barriers
+        self.barrier_constraints = None
         self.input_vector = ca.MX.sym('input', 2)
-        self.vel_cmd_msg = Twist()
-        self.parameters = ca_tools.structure3.msymStruct = None
-
+        
+        # Agent Information
         self.agent_pose = PoseStamped()
         self.agent_name = rospy.get_param('~robot_name')
         self.agent_id = int(self.agent_name[-1])
         self.last_received_pose = rospy.Time()
 
-        self.barriers = barriers
-        self.barrier_constraints: ca.MX = None
+        # Neighbouring Agents
         self.initial_states = initial_states
-        self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
-        # self.relevant_barriers = [self.barriers[self.agent_id - 1]]
+        self.agents = list(self.initial_states.keys())
+        self.neighbour_agents = {}
+        
+        # Velocity Command Message
+        self.vel_cmd_msg = Twist()
 
-        self.agents = [agent for agent in self.initial_states.keys()]
-        self.neighbour_agents: Dict[int, PoseStamped] = {}
-
+        # nabla variables
         self.nabla_funs = []
         self.nabla_inputs = []
-        self.nabla = []
-        
+        self.nabla_val = []
 
-
-        # Setup subscriber for agent pose
+        # Setup subscribers
         rospy.Subscriber("/qualisys/"+self.agent_name+"/pose", PoseStamped, self.pose_callback)
 
-        # Setup subscribers for all other agents
         for id in self.agents:
             if id != self.agent_id:
-                # rospy.Subscriber(f"/qualisys/nexus{id}/pose", PoseStamped, self.other_agent_pose_callback)
                 rospy.Subscriber(f"/nexus{id}/agent_pose", PoseStamped, self.other_agent_pose_callback)
             else:
                 continue
 
-        # Setup publisher for velocity commands and agent pose
+        # Setup publishers
         self.vel_pub = rospy.Publisher("cmd_vel", Twist, queue_size=100)
         self.agent_pose_pub = rospy.Publisher(f"agent_pose", PoseStamped, queue_size=100)
             
-
         #Setup transform subscriber
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
@@ -72,7 +69,6 @@ class Controller():
 
         self.solver = self.set_up_optimization_problem()
         self.control_loop()
-
 
     
     def set_up_optimization_problem(self):
@@ -84,18 +80,17 @@ class Controller():
         self.parameters = ca_tools.struct_symMX(parameter_list)
 
         # Create the barrier constraints and the objective function
+        self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
         self.barrier_constraints, self.nabla_funs, self.nabla_inputs = self.generate_barrier_constraints(self.relevant_barriers)
         constraint = ca.vertcat(self.barrier_constraints)
-        objective = self.input_vector.T @ self.Q @ self.input_vector
+        objective = self.input_vector.T @ self.Q @ self.input_vector # add slack variable here
 
-        # rospy.loginfo(f"nabla_list{self.agent_id}: {self.nabla_list}")
         # Create the optimization solver
         qp = {'x': self.input_vector, 'f': objective, 'g': constraint, 'p': self.parameters}
         opts = {'printLevel': 'none'}
         self.qpsolver = ca.qpsol('sol', 'qpoases', qp, opts)
 
         return self.qpsolver
-
 
 
     def generate_barrier_constraints(self, barrier_list:List[BarrierFunction]) -> ca.MX:
@@ -107,7 +102,7 @@ class Controller():
 
             named_inputs = {"state_"+str(id):self.parameters["state_"+str(id)] for id in barrier.contributing_agents}
             named_inputs["time"] = self.parameters["time"]
-            
+
             nabla_xi_fun = barrier.gradient_function_wrt_state_of_agent(self.agent_id)
             partial_time_derivative_fun = barrier.partial_time_derivative
             barrier_fun = barrier.function
@@ -118,16 +113,13 @@ class Controller():
 
             # Fix load sharing for different tasks
             load_sharing = 1/len(barrier.contributing_agents)
+            # load_sharing = 0.5
             barrier_constraint   = -1* ( ca.dot(nabla_xi.T, self.input_vector) + load_sharing * (dbdt + alpha_b))
             constraints.append(barrier_constraint)
-
             nabla_xi_funs.append(nabla_xi_fun)
             nabla_xi_inputs.append(named_inputs)
-            
-            
-
+  
         return ca.vertcat(*constraints), nabla_xi_funs, nabla_xi_inputs
-
 
 
     def control_loop(self):
@@ -143,17 +135,22 @@ class Controller():
             for id in self.neighbour_agents.keys():
                 current_parameters[f'state_{id}'] = ca.vertcat(self.neighbour_agents[id].pose.position.x, self.neighbour_agents[id].pose.position.y)
 
-            for i, fun in enumerate(self.nabla_funs):
+            for i, nabla_fun in enumerate(self.nabla_funs):
                 inputs_list = {key: current_parameters[key] for key in self.nabla_inputs[i].keys()}
-                self.nabla.append(fun.call(inputs_list)["value"])
+                self.nabla_val.append(nabla_fun.call(inputs_list)["value"])
 
-
-            if any(ca.norm_2(val) < 1e-10 for val in self.nabla):
+            # Solve the optimization problem and publish the velocity command 
+            if any(ca.norm_2(val) < 1e-10 for val in self.nabla_val):
                 optimal_input = ca.MX([0, 0])
+                # print the norm value of the gradient
+                
+                
             else:
                 # Solve the optimization problem and publish the velocity command 
                 sol = self.solver(p = current_parameters, ubg = 0) 
                 optimal_input  = sol['x']
+
+            
 
             self.vel_cmd_msg.linear.x = optimal_input[0]
             self.vel_cmd_msg.linear.y = optimal_input[1]        
@@ -169,7 +166,8 @@ class Controller():
             r.sleep()
 
 
-
+    # ----------- Callbacks -----------------
+    
     def pose_callback(self, msg):
         self.agent_pose = msg
         self.last_received_pose = rospy.Time.now()
@@ -178,7 +176,7 @@ class Controller():
     def other_agent_pose_callback(self, msg):
         agent_id = int(msg._connection_header['topic'].split('/')[-2].replace('nexus', '')) 
         self.neighbour_agents[agent_id] = msg
-        # pass
+        
 
 
 def transform_twist(twist = Twist, transform_stamped = TransformStamped):
@@ -199,6 +197,7 @@ def transform_twist(twist = Twist, transform_stamped = TransformStamped):
     new_twist.angular = out_rot.vector
 
     return new_twist
+
 
 
 
