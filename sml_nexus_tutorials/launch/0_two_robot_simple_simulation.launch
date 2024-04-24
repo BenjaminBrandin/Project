@@ -17,7 +17,7 @@
     <include file="$(find sml_nexus_description)/launch/sml_nexus_description.launch" />
     <!-- Spawn the robot -->
     <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model"
-      args="-urdf -model nexus1 -param robot_description -x 0 -y 0 -z 0.5" />
+      args="-urdf -model nexus1 -param robot_description -x -3 -y -3 -z 0.5" />
       <!-- Controller node -->
     <node name="controller" pkg="sml_nexus_tutorials" type="controller.py" output="screen" >
       <param name="robot_name" value="nexus1"/>

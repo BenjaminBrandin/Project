@@ -22,11 +22,18 @@ class Controller():
 
         # Optimization Problem
         self.solver = None
-        self.Q = ca.DM_eye(2)
+        # self.Q = ca.DM_eye(2)
         self.parameters = None
         self.barriers = barriers
-        self.barrier_constraints = None
+        self.barrier_constraints = []
         self.input_vector = ca.MX.sym('input', 2)
+        self.slack_variables = {}
+
+        # nabla variables
+        self.nabla_funs = []
+        self.nabla_inputs = []
+        self.nabla_val = []
+        self.barrier_val = []
         
         # Agent Information
         self.agent_pose = PoseStamped()
@@ -42,14 +49,9 @@ class Controller():
         # Velocity Command Message
         self.vel_cmd_msg = Twist()
 
-        # nabla variables
-        self.nabla_funs = []
-        self.nabla_inputs = []
-        self.nabla_val = []
 
         # Setup subscribers
         rospy.Subscriber("/qualisys/"+self.agent_name+"/pose", PoseStamped, self.pose_callback)
-
         for id in self.agents:
             if id != self.agent_id:
                 rospy.Subscriber(f"/nexus{id}/agent_pose", PoseStamped, self.other_agent_pose_callback)
@@ -67,7 +69,8 @@ class Controller():
             rospy.loginfo("Wait for transform to be available")
             rospy.sleep(1)
 
-        self.solver = self.set_up_optimization_problem()
+        # Initialize the optimization problem
+        self.set_up_optimization_problem()
         self.control_loop()
 
     
@@ -80,53 +83,81 @@ class Controller():
         self.parameters = ca_tools.struct_symMX(parameter_list)
 
         # Create the barrier constraints and the objective function
+        # self.relevant_barriers = [self.barriers[self.agent_id-1]]
         self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
-        self.barrier_constraints, self.nabla_funs, self.nabla_inputs = self.generate_barrier_constraints(self.relevant_barriers)
-        constraint = ca.vertcat(self.barrier_constraints)
-        objective = self.input_vector.T @ self.Q @ self.input_vector # add slack variable here
+
+        barrier_constraints = self.generate_barrier_constraints(self.relevant_barriers)
+        slack_constraints = - ca.vertcat(*list(self.slack_variables.values()))
+        constraints = ca.vertcat(barrier_constraints, slack_constraints)
+
+        slack_vector = ca.vertcat(*list(self.slack_variables.values()))
+        opt_vector = ca.vertcat(self.input_vector, slack_vector)
+        # objective = self.input_vector.T @ self.Q @ self.input_vector # add slack variable here for each constraint
+        cost = self.input_vector.T @ self.input_vector
 
         # Create the optimization solver
-        qp = {'x': self.input_vector, 'f': objective, 'g': constraint, 'p': self.parameters}
-        opts = {'printLevel': 'none'}
-        self.qpsolver = ca.qpsol('sol', 'qpoases', qp, opts)
+        qp = {'x': opt_vector, 'f': cost, 'g': constraints, 'p': self.parameters}
+        self.qpsolver = ca.qpsol('sol', 'qpoases', qp, {'printLevel': 'none'})
 
-        return self.qpsolver
+        
 
 
     def generate_barrier_constraints(self, barrier_list:List[BarrierFunction]) -> ca.MX:
-
         constraints = []
-        nabla_xi_funs = []
-        nabla_xi_inputs = []
         for barrier in barrier_list:
 
+            # Check if the barrier has more than one contributing agent
+            if len(barrier.contributing_agents) > 1:
+                if barrier.contributing_agents[0] == self.agent_id: # can maybe use the list as priority. so the first element is the leader agent
+                    slack_id = barrier.contributing_agents[1]
+                else:
+                    slack_id = barrier.contributing_agents[0]
+            else : 
+                slack_id = self.agent_id
+
+            # Create the named inputs for the barrier function
             named_inputs = {"state_"+str(id):self.parameters["state_"+str(id)] for id in barrier.contributing_agents}
             named_inputs["time"] = self.parameters["time"]
 
+            # Get the necessary functions from the barrier
             nabla_xi_fun = barrier.gradient_function_wrt_state_of_agent(self.agent_id)
             partial_time_derivative_fun = barrier.partial_time_derivative
             barrier_fun = barrier.function
 
+            # Calculate the symbolic expressions for the barrier constraint
             nabla_xi = nabla_xi_fun.call(named_inputs)["value"]                                        
             dbdt = partial_time_derivative_fun.call(named_inputs)["value"]                             
             alpha_b = barrier.associated_alpha_function(barrier_fun.call(named_inputs)["value"])       
 
+
             # Fix load sharing for different tasks
-            load_sharing = 1/len(barrier.contributing_agents)
-            # load_sharing = 0.5
-            barrier_constraint   = -1* ( ca.dot(nabla_xi.T, self.input_vector) + load_sharing * (dbdt + alpha_b))
+            if slack_id == self.agent_id:
+                slack = ca.MX.sym('slack', 1)
+                self.slack_variables[self.agent_id] = slack
+                load_sharing = 1
+                # barrier_constraint = -1* ( ca.dot(nabla_xi.T, self.input_vector) + load_sharing * (dbdt + alpha_b + slack))
+            else:
+                slack = ca.MX.sym('slack', 1)
+                self.slack_variables[slack_id] = slack
+                load_sharing = 0.1
+                # barrier_constraint = -1* ( ca.dot(nabla_xi.T, self.input_vector) + load_sharing * (dbdt + alpha_b + slack))
+            
+            barrier_constraint = -1* ( ca.dot(nabla_xi.T, self.input_vector) + load_sharing * (dbdt + alpha_b + slack))
+
             constraints.append(barrier_constraint)
-            nabla_xi_funs.append(nabla_xi_fun)
-            nabla_xi_inputs.append(named_inputs)
+            # self.barrier_constraints.append(barrier_constraint)
+            # self.nabla_funs.append(nabla_xi_fun)
+            # self.nabla_inputs.append(named_inputs)
+            return ca.vertcat(*constraints)
   
-        return ca.vertcat(*constraints), nabla_xi_funs, nabla_xi_inputs
+
 
 
     def control_loop(self):
         r = rospy.Rate(50)
-        inputs_list = {}
+        
         while not rospy.is_shutdown():
-
+            inputs_list = {}
             # Fill the structure with the current values
             current_parameters = self.parameters(0)
             current_parameters["time"] = ca.vertcat(self.last_received_pose.to_sec())
@@ -135,22 +166,28 @@ class Controller():
             for id in self.neighbour_agents.keys():
                 current_parameters[f'state_{id}'] = ca.vertcat(self.neighbour_agents[id].pose.position.x, self.neighbour_agents[id].pose.position.y)
 
+
+            self.nabla_val = []
+            self.barrier_val = []
             for i, nabla_fun in enumerate(self.nabla_funs):
                 inputs_list = {key: current_parameters[key] for key in self.nabla_inputs[i].keys()}
-                self.nabla_val.append(nabla_fun.call(inputs_list)["value"])
+                nabla_val = nabla_fun.call(inputs_list)["value"]
+                barrier_val = self.relevant_barriers[i].function.call(inputs_list)["value"]
+
+                self.nabla_val.append(ca.norm_2(nabla_val))
+                self.barrier_val.append(barrier_val)
+
+            # rospy.loginfo(f"barrier values for agent {self.agent_id}: {self.barrier_val}")
+            # rospy.loginfo(f"gradient{self.agent_id}: {self.nabla_val}")
 
             # Solve the optimization problem and publish the velocity command 
             if any(ca.norm_2(val) < 1e-10 for val in self.nabla_val):
                 optimal_input = ca.MX([0, 0])
-                # print the norm value of the gradient
-                
-                
             else:
-                # Solve the optimization problem and publish the velocity command 
                 sol = self.solver(p = current_parameters, ubg = 0) 
                 optimal_input  = sol['x']
 
-            
+            # rospy.loginfo(f"Constraint violation {self.agent_id}: {sol['g']}")
 
             self.vel_cmd_msg.linear.x = optimal_input[0]
             self.vel_cmd_msg.linear.y = optimal_input[1]        
