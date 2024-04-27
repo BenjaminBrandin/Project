@@ -45,11 +45,11 @@ class Controller():
         # Neighbouring Agents
         self.total_agents = rospy.get_param('~num_robots')
         self.agents = {}
-        # self.neighbour_agents = {}
-        # initial_states = [np.array([-3, -3]), np.array([0, -2]), np.array([-3, 2])]
+        self.neighbour_agents = {}
+        initial_states = [np.array([-3, -3]), np.array([0, -2]), np.array([-3, 2])]
 
-        # for i, state in enumerate(initial_states, start=1):
-        #     self.agents[i] = Agent(id=i, initial_state=state)
+        for i, state in enumerate(initial_states, start=1):
+            self.agents[i] = Agent(id=i, initial_state=state)
         
 
 
@@ -68,12 +68,12 @@ class Controller():
         rospy.Subscriber("/tasks", task_msg, self.task_callback)
         rospy.Subscriber("/qualisys/"+self.agent_name+"/pose", PoseStamped, self.pose_callback)
         for id in range(1, self.total_agents+1):
-            rospy.Subscriber(f"/nexus{id}/agent_pose", PoseStamped, self.other_agent_pose_callback)
+            # rospy.Subscriber(f"/nexus{id}/agent_pose", PoseStamped, self.other_agent_pose_callback)
 
-            # if id != self.agent_id:
-            #     rospy.Subscriber(f"/nexus{id}/agent_pose", PoseStamped, self.other_agent_pose_callback)
-            # else:
-            #     continue
+            if id != self.agent_id:
+                rospy.Subscriber(f"/nexus{id}/agent_pose", PoseStamped, self.other_agent_pose_callback)
+            else:
+                continue
     
         
 
@@ -107,7 +107,7 @@ class Controller():
         # Create the parameter structure for the optimization problem --- 'p' ---
         parameter_list = []
         parameter_list += [ca_tools.entry(f"state_{self.agent_id}", shape=2)]
-        parameter_list += [ca_tools.entry(f"state_{id}", shape=2) for id in self.agents.keys() if id != self.agent_id] 
+        parameter_list += [ca_tools.entry(f"state_{id}", shape=2) for id in self.agents.keys() if id != self.agent_id] # look at this agent
         parameter_list += [ca_tools.entry("time", shape=1)]
         self.parameters = ca_tools.struct_symMX(parameter_list)
 
@@ -192,8 +192,8 @@ class Controller():
             current_parameters = self.parameters(0)
             current_parameters["time"] = ca.vertcat(self.last_received_pose.to_sec())
             current_parameters[f'state_{self.agent_id}'] = ca.vertcat(self.agent_pose.pose.position.x, self.agent_pose.pose.position.y)
-            for id in self.agents.keys():
-                current_parameters[f'state_{id}'] = ca.vertcat(self.agents[id].state[0], self.agents[id].state[1])
+            for id in self.neighbour_agents.keys():
+                current_parameters[f'state_{id}'] = ca.vertcat(self.neighbour_agents[id].pose.position.x, self.neighbour_agents[id].pose.position.y)
 
             # Calculate the gradient values
             self.nabla_val = []
@@ -236,9 +236,9 @@ class Controller():
 
     def other_agent_pose_callback(self, msg):
         agent_id = int(msg._connection_header['topic'].split('/')[-2].replace('nexus', '')) 
-        # self.neighbour_agents[agent_id] = msg
-        state = np.array([msg.pose.position.x, msg.pose.position.y])
-        self.agents[agent_id] = Agent(id=agent_id, initial_state=state)
+        self.neighbour_agents[agent_id] = msg
+        # state = np.array([msg.pose.position.x, msg.pose.position.y])
+        # self.agents[agent_id] = Agent(id=agent_id, initial_state=state)
 
     def task_callback(self, msg):
         # Store the task message

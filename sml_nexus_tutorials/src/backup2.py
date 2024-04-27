@@ -81,7 +81,8 @@ class Controller():
     def get_qpsolver_and_parameter_structure(self):
         # Create the parameter structure for the optimization problem --- 'p' ---
         parameter_list = []
-        parameter_list += [ca_tools.entry(f"state_{id}", shape=2) for id in self.agents.keys()]
+        parameter_list += [ca_tools.entry(f"state_{self.agent_id}", shape=2)]
+        parameter_list += [ca_tools.entry(f"state_{id}", shape=2) for id in self.agents.keys() if id != self.agent_id]
         parameter_list += [ca_tools.entry("time", shape=1)]
         self.parameters = ca_tools.struct_symMX(parameter_list)
 
@@ -159,6 +160,7 @@ class Controller():
             # Fill the structure with the current values
             current_parameters = self.parameters(0)
             current_parameters["time"] = ca.vertcat(self.last_received_pose.to_sec())
+            current_parameters[f'state_{self.agent_id}'] = ca.vertcat(self.agent_pose.pose.position.x, self.agent_pose.pose.position.y)
             for id in self.agents.keys():
                 current_parameters[f'state_{id}'] = ca.vertcat(self.agents[id].state[0], self.agents[id].state[1])
 
