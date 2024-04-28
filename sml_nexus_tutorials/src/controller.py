@@ -31,26 +31,27 @@ class Controller():
         # Nabla variables
         self.nabla_funs = []
         self.nabla_inputs = []
-        self.nabla_val = []
 
         # Agent Information
         self.agent_pose = PoseStamped()
         self.agent_name = rospy.get_param('~robot_name')
         self.agent_id = int(self.agent_name[-1])
-        self.last_received_pose = rospy.Time()
+        self.last_pose_time = rospy.Time()
 
         # Neighbouring Agents
-        self.total_agents = rospy.get_param('~num_robots')
         self.agents = {}
+        self.total_agents = rospy.get_param('~num_robots')
+        
 
-        # Barriers
+        # Barriers and tasks
         self.barriers = []
+        self.task = task_msg()
 
         # Velocity Command Message
         self.max_velocity = 5
         self.vel_cmd_msg = Twist()
 
-        self.task = task_msg()
+        
 
         # Setup subscribers
         rospy.Subscriber("/tasks", task_msg, self.task_callback)
@@ -69,14 +70,14 @@ class Controller():
             rospy.loginfo("Wait for transform to be available")
             rospy.sleep(1)
 
-        # Wait until all the task messages have been received
+        # Wait until all the task messages have been received |Find a better way to do this|
         while len(self.barriers) < 3:
             rospy.sleep(1)
 
         # Initialize the optimization problem
-        self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
         self.solver = self.get_qpsolver_and_parameter_structure()
         self.control_loop()
+
 
     def get_qpsolver_and_parameter_structure(self):
         # Create the parameter structure for the optimization problem --- 'p' ---
@@ -86,6 +87,7 @@ class Controller():
         self.parameters = ca_tools.struct_symMX(parameter_list)
 
         # Create the constraints for the optimization problem --- 'g' ---
+        self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
         barrier_constraints = self.generate_barrier_constraints(self.relevant_barriers)
         slack_constraints = - ca.vertcat(*list(self.slack_variables.values()))
         constraints = ca.vertcat(barrier_constraints, slack_constraints)
@@ -99,7 +101,7 @@ class Controller():
         for id,slack in self.slack_variables.items():
             if id == self.agent_id:
                 cost += 100* slack**2
-            else :
+            else:
                 cost += 10* slack**2
 
         # Create the optimization solver
@@ -107,6 +109,7 @@ class Controller():
         solver = ca.qpsol('sol', 'qpoases', qp, {'printLevel': 'none'})
 
         return solver
+
 
     def generate_barrier_constraints(self, barrier_list:List[BarrierFunction]) -> ca.MX:
         constraints = []
@@ -141,7 +144,7 @@ class Controller():
                 load_sharing = 1
             else:
                 slack = ca.MX.sym('slack', 1)
-                self.slack_variables[neighbour_id] = slack
+                self.slack_variables[neighbour_id] = slack  
                 load_sharing = 0.1
 
             barrier_constraint = -1 * (ca.dot(nabla_xi.T, self.input_vector) + load_sharing * (dbdt + alpha_b + slack))
@@ -151,35 +154,38 @@ class Controller():
 
         return ca.vertcat(*constraints)
 
+
     def control_loop(self):
         r = rospy.Rate(50)
 
         while not rospy.is_shutdown():
-            inputs_list = {}
+            
             # Fill the structure with the current values
             current_parameters = self.parameters(0)
-            current_parameters["time"] = ca.vertcat(self.last_received_pose.to_sec())
+            current_parameters["time"] = ca.vertcat(self.last_pose_time.to_sec())
             for id in self.agents.keys():
                 current_parameters[f'state_{id}'] = ca.vertcat(self.agents[id].state[0], self.agents[id].state[1])
 
             # Calculate the gradient values
-            self.nabla_val = []
+            nabla_list = []
+            inputs = {}
             for i, nabla_fun in enumerate(self.nabla_funs):
-                inputs_list = {key: current_parameters[key] for key in self.nabla_inputs[i].keys()}
-                nabla_val = nabla_fun.call(inputs_list)["value"]
-                self.nabla_val.append(ca.norm_2(nabla_val))
-            rospy.loginfo(f"gradient{self.agent_id}: {self.nabla_val}")
+                inputs = {key: current_parameters[key] for key in self.nabla_inputs[i].keys()}
+                nabla_val = nabla_fun.call(inputs)["value"]
+                nabla_list.append(ca.norm_2(nabla_val))
+            # rospy.loginfo(f"gradient{self.agent_id}: {nabla_list}")
 
             # Solve the optimization problem and
-            if any(ca.norm_2(val) < 1e-10 for val in self.nabla_val):
+            if any(ca.norm_2(val) < 1e-10 for val in nabla_list):
                 optimal_input = ca.MX([0, 0])
             else:
                 sol = self.solver(p=current_parameters, ubg=0)
                 optimal_input  = sol['x']
+            rospy.loginfo(f"optimal_input {self.agent_id}: {optimal_input}")
 
             # Publish the velocity command
-            self.vel_cmd_msg.linear.x = optimal_input[0]
-            self.vel_cmd_msg.linear.y = optimal_input[1]
+            self.vel_cmd_msg.linear.x = np.minimum(optimal_input[0], self.max_velocity)
+            self.vel_cmd_msg.linear.y = np.minimum(optimal_input[1], self.max_velocity)
 
             try:
                 # Get transform from mocap frame to agent frame
@@ -195,13 +201,13 @@ class Controller():
 
     def pose_callback(self, msg):
         self.agent_pose = msg
-        self.last_received_pose = rospy.Time.now()
         self.agent_pose_pub.publish(self.agent_pose)
 
     def other_agent_pose_callback(self, msg):
         agent_id = int(msg._connection_header['topic'].split('/')[-2].replace('nexus', ''))
         state = np.array([msg.pose.position.x, msg.pose.position.y])
         self.agents[agent_id] = Agent(id=agent_id, initial_state=state)
+        self.last_pose_time = rospy.Time.now() # If time for each agent is needed you need to change this
 
     def task_callback(self, msg):
         # Store the task message

@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
 import rospy
-import sys
-import os
 from custom_msg.msg import task_msg
 import yaml
 import numpy as np
 import casadi as ca
 import networkx as nx
-# from custom_msg.msg import task_msg
-# from std_msgs.msg import String
-from geometry_msgs.msg import PoseStamped
 from builders import Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, go_to_goal_predicate_2d, formation_predicate, create_barrier_from_task, epsilon_position_closeness_predicate
 import matplotlib.pyplot as plt
 from graph_module import create_communication_graph_from_states, create_task_graph_from_edges
@@ -29,11 +24,11 @@ class Manager():
 
         # setup publishers
         self.task_pub = rospy.Publisher("tasks", task_msg, queue_size=10)
-        # self.start_pos_pub
+
 
         # Load the initial states and the task from the yaml files
         with open("/home/benjamin/catkin_ws/src/sml_nexus_tutorials/sml_nexus_tutorials/yaml_files/start_pos.yaml") as file:
-            self.start_pos = yaml.safe_load(file)   # This is used when I want to create class objects: yaml.load(file, Loader=yaml.FullLoader)
+            self.start_pos = yaml.safe_load(file)   # Replace this with $(arg coord) in launch file and get_param(-coord) in the code
 
         with open("/home/benjamin/catkin_ws/src/sml_nexus_tutorials/sml_nexus_tutorials/yaml_files/tasks.yaml") as file:
             self.tasks = yaml.safe_load(file)
@@ -44,21 +39,20 @@ class Manager():
             agent = Agent(id=i, initial_state=state)
             self.agents[i] = agent
 
-        # Creating the graphs
+        # Extracting the edges of the tasks and the communication information
         task_edges = [tuple(task["EDGE"]) for task in self.tasks.values()]
-        # Extract the communication information
         communication_info = {task_name: {"EDGE": task_info["EDGE"], "COMMUNICATE": task_info["COMMUNICATE"]} for task_name, task_info in self.tasks.items()}
+        
+        # Creating the graphs
         self.task_graph = create_task_graph_from_edges(edge_list = task_edges) # creates an empty task graph
         self.comm_graph = create_communication_graph_from_states(self.agents.keys(), communication_info)
         
-        # Create the graph
-        self.create_graph() # If you comment out this line, you need rospy.sleep(6) before self.create_tasks() to ensure the control nodes have loaded
-        self.create_tasks()
+        self.update_graph()
+        self.plot_graph() # If you comment out this line, you need rospy.sleep(6) before self.create_tasks() to ensure the control nodes have loaded
+        self.publish_tasks()
 
 
-
-    def create_tasks(self):
-
+    def publish_tasks(self):
         for task_name, task_value in self.tasks.items():
             # Create a task_msg from the task
             task_message = task_msg()
@@ -77,34 +71,33 @@ class Manager():
             rospy.sleep(1)
 
 
-        # Creating the alpha function that is the same for all the tasks for now
-        dummy_scalar = ca.MX.sym('dummy_scalar', 1)
-        alpha_fun = ca.Function('alpha_fun', [dummy_scalar], [self.scale_factor * dummy_scalar])
-
-        # Iterate over the tasks in the yaml file
+    def update_graph(self):
         for task_name, task_info in self.tasks.items():
             # Get the edge from the task graph
             edge = self.task_graph[task_info["EDGE"][0]][task_info["EDGE"][1]]["container"]
-
-            # Create the predicate based on the type of the task
-            if task_info["TYPE"] == "go_to_goal_predicate_2d":
-                predicate = go_to_goal_predicate_2d(goal=np.array(task_info["CENTER"]), epsilon=task_info["EPSILON"], agent=self.agents[task_info["INVOLVED_AGENTS"][0]])
-            elif task_info["TYPE"] == "formation_predicate":
-                predicate = formation_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]], relative_pos=np.array(task_info["CENTER"]))
-            # Add more predicates here
-
-            # Create the temporal operator
-            temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=task_info["INTERVAL"][0], b=task_info["INTERVAL"][1]))
-
             # Create the task
-            task = StlTask(predicate=predicate, temporal_operator=temporal_operator)
-
-            # Add the task to the barriers and the edge
-            self.barriers.append(create_barrier_from_task(task=task, initial_conditions=[self.agents[i] for i in task_info["INVOLVED_AGENTS"]], alpha_function=alpha_fun))
+            task = self.create_task(task_info)
+            # Add the task to the edge
             edge.add_tasks(task)
 
 
-    def create_graph(self):
+    def create_task(self, task_info) -> StlTask:
+        # Create the predicate based on the type of the task
+        if task_info["TYPE"] == "go_to_goal_predicate_2d":
+            predicate = go_to_goal_predicate_2d(goal=np.array(task_info["CENTER"]), epsilon=task_info["EPSILON"], agent=self.agents[task_info["INVOLVED_AGENTS"][0]])
+        elif task_info["TYPE"] == "formation_predicate":
+            predicate = formation_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]], relative_pos=np.array(task_info["CENTER"]))
+        # Add more predicates here
+
+        # Create the temporal operator
+        temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=task_info["INTERVAL"][0], b=task_info["INTERVAL"][1]))
+
+        # Create the task
+        task = StlTask(predicate=predicate, temporal_operator=temporal_operator)
+        return task
+
+
+    def plot_graph(self):
         fig, ax = plt.subplots(2, 1)
         self.draw_graph(ax[0], self.comm_graph, "Communication Graph")
         self.draw_graph(ax[1], self.task_graph, "Task Graph")

@@ -74,19 +74,19 @@ class Controller():
             rospy.sleep(1)
 
         # Initialize the optimization problem
-        self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
+        
         self.solver = self.get_qpsolver_and_parameter_structure()
         self.control_loop()
 
     def get_qpsolver_and_parameter_structure(self):
         # Create the parameter structure for the optimization problem --- 'p' ---
         parameter_list = []
-        parameter_list += [ca_tools.entry(f"state_{self.agent_id}", shape=2)]
-        parameter_list += [ca_tools.entry(f"state_{id}", shape=2) for id in self.agents.keys() if id != self.agent_id]
+        parameter_list += [ca_tools.entry(f"state_{id}", shape=2) for id in self.agents.keys()]
         parameter_list += [ca_tools.entry("time", shape=1)]
         self.parameters = ca_tools.struct_symMX(parameter_list)
 
         # Create the constraints for the optimization problem --- 'g' ---
+        self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
         barrier_constraints = self.generate_barrier_constraints(self.relevant_barriers)
         slack_constraints = - ca.vertcat(*list(self.slack_variables.values()))
         constraints = ca.vertcat(barrier_constraints, slack_constraints)
@@ -160,7 +160,6 @@ class Controller():
             # Fill the structure with the current values
             current_parameters = self.parameters(0)
             current_parameters["time"] = ca.vertcat(self.last_received_pose.to_sec())
-            current_parameters[f'state_{self.agent_id}'] = ca.vertcat(self.agent_pose.pose.position.x, self.agent_pose.pose.position.y)
             for id in self.agents.keys():
                 current_parameters[f'state_{id}'] = ca.vertcat(self.agents[id].state[0], self.agents[id].state[1])
 

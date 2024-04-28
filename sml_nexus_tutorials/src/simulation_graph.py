@@ -2,6 +2,7 @@
 import rospy
 import sys
 import json
+import yaml
 import numpy as np
 import casadi as ca
 import networkx as nx
@@ -24,6 +25,9 @@ state2 = np.array([0,-2])
 state3 = np.array([-3,2])     
 initial_states = {1:state1,2:state2,3:state3}
 
+with open("/home/benjamin/catkin_ws/src/sml_nexus_tutorials/sml_nexus_tutorials/yaml_files/tasks.yaml") as file:
+    tasks = yaml.safe_load(file)
+communication_info = {task_name: {"EDGE": task_info["EDGE"], "COMMUNICATE": task_info["COMMUNICATE"]} for task_name, task_info in tasks.items()}
 # Creating the robots
 robot_1 = Agent(id=1, initial_state=state1)
 robot_2 = Agent(id=2, initial_state=state2)
@@ -32,7 +36,7 @@ robot_3 = Agent(id=3, initial_state=state3)
 # Creating the graphs
 task_edges = [(1,1),(1,2),(1,3)]
 task_graph = create_task_graph_from_edges(edge_list = task_edges) # creates an empty task graph
-comm_graph = create_communication_graph_from_states(initial_states,communication_radius)
+comm_graph = create_communication_graph_from_states(initial_states,communication_info)
 
 # Creating the alpha function that is the same for all the tasks for now
 dummy_scalar = ca.MX.sym('dummy_scalar', 1)
