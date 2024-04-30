@@ -112,45 +112,37 @@ class PredicateFunction :
     def __init__(self,
                  function: ca.Function = None,
                  stateSpaceDimension: int = 2,
-                 computeApproximation = False) -> None:
+                 computeApproximation = False,
+                 sourceNode: int = None,
+                 targetNode: int = None) -> None:
         
 
-        if not isinstance(function, ca.Function):
-            raise TypeError("function must be a casadi.MX object") 
-        
-        if not check_predicate_function_IO_names(function) :
-            raise ValueError("The input names for the predicate functons must be in the form 'state_i' where ''i'' is the agent ID and the output name must be 'value', got input nmaes " + str(function.name_in()) + " and output names " + str(function.name_out()) + " instead")
-        
         self._function = function
-        self._contributing_agents = [get_id_from_input_name(name) for name in function.name_in()]
-
-        if len(self._contributing_agents) > 1:
-            self._sourceNode = self.contributing_agents[0]
-            self._targetNode = self.contributing_agents[1]
-            self._edgeTuple = tuple([self.sourceNode, self.targetNode])
-        else:
-            self._sourceNode = self.contributing_agents[0]
-            self._targetNode = self.contributing_agents[0]
-            self._edgeTuple = tuple([self.sourceNode, self.targetNode])
         self._dim = stateSpaceDimension
-        
 
-        if self._function != None :
+        
+        if self._function != None:
             self._isParametric = 0
-            self._centerVar    = None
-            self._nuVar        = None
-            self._etaVar       = None
+            self._centerVar = None
+            self._nuVar = None
+            self._etaVar = None
+            self._contributing_agents = [get_id_from_input_name(name) for name in self._function.name_in()]
+            if len(self._contributing_agents) > 1:
+                self._sourceNode, self._targetNode = self._contributing_agents[:2]
+            else:
+                self._sourceNode = self._targetNode = self._contributing_agents[0]
+            self._edgeTuple = (self._sourceNode, self._targetNode)
+        else:
+            # Create hypercube parameters since the formula is parametric
+            self._centerVar = globalOptimizer.variable(self._dim, 1)  # casadi.Opti.variable() edge Casadi Variable for optimization
+            self._nuVar = globalOptimizer.variable(self._dim, 1)  # casadi.Opti.variable() nu variable (cuboid dimensions) for optimization
+            self._etaVar = ca.vertcat(self._centerVar, self._nuVar)  # casadi.Opti.variable() [centerVar, nuVar] (just concatenation)
+            self._isParametric = 1
+            self._sourceNode = sourceNode
+            self._targetNode = targetNode
+                
             
-            
-        else :
-            if self._function ==None :
-                # create hypercube parameters since the formula is parameteric
-                self._centerVar = globalOptimizer.variable(self._dim,1) # casadi.Opti.variable() edge Casadi Variable for optimization
-                self._nuVar     = globalOptimizer.variable(self._dim,1) # casadi.Opti.variable() nu variable (cuboid dimensions) for optimization
-                self._etaVar    = ca.vertcat(self._centerVar,self._nuVar) # casadi.Opti.variable() [centerVar,nuVar] (just concatenation)
-                self._isParametric = 1
-            
-        self._isApproximated     = False
+        self._isApproximated               = False
         self._optimalApproximationvertices = None
         self._optimalApproximationCenter   = None # center of the zero level set
         self._optimalApproximationNu       = None # nu vector of the cuboid containing the dimneioson of the cuboid
@@ -611,7 +603,7 @@ class EventuallyOperator(TemporalOperator):
 
 
 
-@dataclass(frozen=True,unsafe_hash=True)
+@dataclass(unsafe_hash=True)
 class StlTask :
     """
     Signal Temporal Logic Task container class. This class is applied to store information about a given STL task like the predicate 

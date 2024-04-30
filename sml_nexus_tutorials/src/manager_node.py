@@ -9,7 +9,7 @@ from builders import Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOpe
 import matplotlib.pyplot as plt
 from graph_module import EdgeTaskContainer, create_communication_graph_from_states, create_task_graph_from_edges
 from custom_msg.msg import task_msg
-# from decomposition_module import computeNewTaskGraph
+from decomposition_module import computeNewTaskGraph
 
 class Manager():
 
@@ -21,6 +21,7 @@ class Manager():
         self.barriers = []
         self.agents = {}
         self.scale_factor = 3
+        
 
 
         # setup publishers
@@ -35,10 +36,12 @@ class Manager():
             self.tasks = yaml.safe_load(file)
 
         # Initial states of the robots and creating the robots
+        start_positions = {}
         for i, (state_key, state_value) in enumerate(self.start_pos.items(), start=1):
             state = np.array(state_value)
             agent = Agent(id=i, initial_state=state)
             self.agents[i] = agent
+            start_positions[i] = state
 
         # Extracting the edges of the tasks and the communication information
         task_edges = [tuple(task["EDGE"]) for task in self.tasks.values()]
@@ -50,7 +53,7 @@ class Manager():
         
         self.update_graph()
 
-        # self.decomposed_graph = computeNewTaskGraph(self.task_graph, self.comm_graph, task_edges, communication_info)
+        self.decomposed_graph = computeNewTaskGraph(self.task_graph, self.comm_graph, task_edges, communication_info, start_position=start_positions)
 
         self.plot_graph() # If you comment out this line, you need rospy.sleep(6) before self.create_tasks() to ensure the control nodes have loaded
         self.publish_tasks()
