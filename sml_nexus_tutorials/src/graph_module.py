@@ -35,14 +35,28 @@ UniqueIdentifier = int
 from   dataclasses import dataclass,field
 
 # recall that mutable objects remain mutable even of the class is frozen
-@dataclass(frozen=True,unsafe_hash=True)
-class EdgeTaskContainer :
-    """
-    Data class to create a graph edge, This will contain all the barrier function defined over this edge.
-    """
-    edge_tuple             : Tuple[UniqueIdentifier,UniqueIdentifier]
-    weight                 : float         = 1
-    task_list              : List[StlTask] = field(default_factory=list)
+@dataclass(unsafe_hash=True)
+class EdgeTaskContainer:
+
+    def __init__(self, edge_tuple: Tuple[UniqueIdentifier,UniqueIdentifier], weight: float = 1, task_list: List[StlTask] = []):
+
+        self._edge_tuple                    : Tuple[UniqueIdentifier,UniqueIdentifier] = edge_tuple
+        self._weight                        : float       = 1
+        self._task_list                     : List[StlTask] = field(default_factory=list)
+        self._involved_in_optimization      : int         = 0
+
+    @property
+    def edge_tuple(self):
+        return self._edge_tuple
+    @property
+    def weight(self):
+        return self._weight
+    @property
+    def task_list(self):
+        return self._task_list
+    @property
+    def involved_in_optimization(self) :
+      return self._involved_in_optimization
       
     def __post_init__(self):
         if self.weight < 0:
@@ -65,7 +79,7 @@ class EdgeTaskContainer :
                 if (not nodei in input_task.contributing_agents) or (not nodej in input_task.contributing_agents) :
                     raise Exception(f"the task {input_task} is not compatible with the edge {self.edge_tuple}. The contributing agents are {input_task.contributing_agents}")
                 else:
-                    self.task_list.append(input_task) # adding a single task
+                    self._task_list.append(input_task) # adding a single task
             
     # check task addition
     def add_tasks(self, tasks: Union[StlTask, List[StlTask]]):
@@ -77,6 +91,9 @@ class EdgeTaskContainer :
     
     def cleanTasks(self)-> None :
         self.task_list      = []
+
+    def flagOptimizationInvolvement(self) -> None :
+        self._involved_in_optimization = 1
     
         
 def create_communication_graph_from_states(states: List[int], communication_info: Dict[str, Dict]) -> nx.Graph :

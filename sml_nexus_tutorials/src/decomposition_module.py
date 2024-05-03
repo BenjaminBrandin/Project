@@ -1,12 +1,82 @@
 import numpy as np
 import casadi as ca
 import itertools
-from builders import StlTask, TimeInterval, TemporalOperator, AlwaysOperator, EventuallyOperator, PredicateFunction
+from builders import StlTask, TimeInterval, TemporalOperator, AlwaysOperator, EventuallyOperator, PredicateFunction, globalOptimizer
 from graph_module import EdgeTaskContainer
 import networkx as nx
 from typing import Tuple , List, Dict
 
-globalOptimizer = ca.Opti()
+
+def allNonParametric(listOfFormulas : List[StlTask]) -> bool :
+    
+    if len(listOfFormulas) == 0 :
+        raise ValueError("Empty list not accepted")
+    for formula in listOfFormulas :
+        if formula.isParametric :
+            return False
+    return True 
+
+def allParametric(listOfFormulas : List[StlTask]) -> bool :
+    
+    if len(listOfFormulas) == 0 :
+        raise ValueError("Empty list not accepted")
+    for formula in listOfFormulas :
+        if not formula.isParametric :
+            return False
+    return True
+
+def isThereMultipleIntersection(formulasList : List[StlTask]) -> bool :
+    """check if one always has more than one intersection with other always operators"""
+   
+    if len(formulasList) == 0 :
+        raise ValueError("Empty list not accepted")
+    for i,formulai in enumerate(formulasList) :
+        count = 0
+        for j,formulaj  in enumerate(formulasList) :
+            
+            intervalsIntersection = formulai.time_interval / formulaj.time_interval
+            if (j!= i) and (not intervalsIntersection.is_empty()) : # if there is an intersection
+                count += 1
+                if count>1 :
+                    return True
+        
+    return False
+
+def haveSameTimeInterval(listOfFormulas : List[StlTask]) -> bool :
+    """check that all formulas might have the same time interval"""
+    if len(listOfFormulas) == 0 :
+        raise ValueError("Empty list not accepted")
+    if len(listOfFormulas) == 1 :
+        return True
+    else :
+        intervalChecker = listOfFormulas[0].time_interval
+        for formula in listOfFormulas[1:] :
+            if formula.time_interval!=intervalChecker :
+                return False
+        return True 
+
+def computeTimeIntervalIntersection(formulas :List[StlTask]) -> TimeInterval :
+    """compute intersection of a list of formulas"""
+    # time interval intersection can be computed in sequence 
+    
+    if len(formulas) <2 :
+        raise ValueError("At least two formulas must be given to compute the interval intersection")
+    
+    intersection = formulas[0].time_interval / formulas[1].time_interval
+    for formula in formulas[2:] :
+        intersection = intersection / formula.time_interval
+    
+    return intersection
+
+def computeVolume(vector):
+    """simply computes the product of elements in a vector"""
+    prod = 1
+    n,m = vector.shape
+    length = max(n,m)
+    for jj in range(length):
+        prod = prod*vector[jj]
+        
+    return prod
 
 
 def edgeSet(path:list, isCycle:bool=False) -> List[Tuple[int,int]]:
@@ -60,7 +130,7 @@ def pathMinkowskiSumVertices(listOfFormulas : List[StlTask], edgeList: List[Tupl
             raise ValueError("edge along the path is not maching the corresponding formula. Make sure that the edges order and the formulas order is correct")
         
         elif formula.edgeTuple != edgeTuple : # case in which the directions are not matching
-            if formula.predicate.isParametric :
+            if formula.isParametric :
                 center = center - formula.centerVar
                 nuSum  = nuSum  + formula.nuVar
             else : # case in which the formula is not parameteric 
@@ -70,7 +140,7 @@ def pathMinkowskiSumVertices(listOfFormulas : List[StlTask], edgeList: List[Tupl
                 else :
                     raise Exception("formula does not have an approximation available. PLease replace formula with its approximation before calling this method")
         else : # case in which the directions are matching
-            if formula.predicate.isParametric :
+            if formula.isParametric :
                 center = center + formula.centerVar
                 nuSum  = nuSum  + formula.nuVar
             else : # case in which the formula is not parameteric 
@@ -85,13 +155,256 @@ def pathMinkowskiSumVertices(listOfFormulas : List[StlTask], edgeList: List[Tupl
     return minkowshySumVertices
 
 
+def computeOverloadingConstraints(edgeObj: EdgeTaskContainer) -> List[ca.Function]:
+    """
+    Given a list of formulas defined on a single edge, it computes the required inclusion constraints due to the conjunction of such formulas along the same edge"""
+    
+    formulas = edgeObj.task_list
+    print(len(formulas))
+    if len(formulas) == 1 :
+        return  [] # with one single formula you don't need overloading constraints
+    
+    # Main assumption check
+    alwaysFormulas :list[StlTask]= [formula for formula in formulas if formula.temporal_operator=="always"]
+    eventuallyFormulas : list[StlTask] = [formula for formula in formulas if formula.temporal_operator=="eventually"]
+ 
+    constraints = []
+    
+    sameTimeInterval = False
+    if isThereMultipleIntersection(formulasList=alwaysFormulas) :
+        if not haveSameTimeInterval(listOfFormulas=alwaysFormulas) : # if there are multiple intersections then they must have the same time interval
+            raise NotImplementedError("Seems like there is at least a triple of always formulas that are intersecting in terms of time interval. This can be handled only if all the always operatrs have the same time interval. This is not the case for the formulas you inserted. Possible constrasting inclusion constraints would arise")
+        else : # in the case they all have the same time interval divide in parameteric and not parametric and start the inclusion process 
+            sameTimeInterval = True # flag so that computation does not have to be redone
+            
+    # PART 1 : resolve always vs always formulas intersections
+    if sameTimeInterval : # all the always formulas have the same time interval
+        sharedTimeInterval = alwaysFormulas[0].time_interval
+        
+        if allParametric(alwaysFormulas) :
+            #in case the formulas are all parameteric then we can include them in a sequence of formulas.
+            # Each formula includes its successor
+            for index in range(len(alwaysFormulas)-1) :
+                parentFormula = alwaysFormulas[index]
+                childFormula  = alwaysFormulas[index+1]
+                
+                constraints  += parentFormula.getConstraintFromInclusionOf(childFormula) #linear inclusion among two parameteric formulas
+
+            
+        else : # case in which the always formulas are non intersecting
+            parametricFormulas    = [formula for formula in alwaysFormulas if formula.isParametric]
+            nonParametricFormulas = [formula for formula in alwaysFormulas if not formula.isParametric]
+            if len(nonParametricFormulas)>1 :
+                raise NotImplementedError("Seems like there is one edge that constains two always specifications with same time interval. This is not smart. Indeed two always formulas with same time interval require that the superleevl sets are intersecting. So just rewrite the formula using the interscetion of the two orginal superlevel sets as predicate superlevel set")
+            
+            else :
+                alwaysFormulas = nonParametricFormulas + parametricFormulas # we reorder the always formulas such that the non parameteric formula is at the beginning. SO the sequence of inclusions is now correct
+                for index in range(len(alwaysFormulas)-1) :
+                    parentFormula = alwaysFormulas[index]
+                    print("parent edge:",parentFormula.edgeTuple)
+                    childFormula  = alwaysFormulas[index+1]
+                    print("child edge:",childFormula.edgeTuple)
+                    constraints  += parentFormula.getConstraintFromInclusionOf(childFormula)
+        
+        innerMostAlwaysFormula = alwaysFormulas[-1] # the always formula the is the last one to receive an inclusion constraint. All the other formulas include this one
+            
+        if len(eventuallyFormulas) :
+            for eventuallyFormula in eventuallyFormulas :
+                if eventuallyFormula.time_interval<=sharedTimeInterval: # always formulas have same
+                    constraints  += innerMostAlwaysFormula.getConstraintFromInclusionOf(eventuallyFormula)
+                    
+    else : # in the case that they don't have the same time interval and the always operators intersections are fixed
+        
+        if len(alwaysFormulas) >=2 : 
+            combinations   = itertools.combinations(range(len(alwaysFormulas)),2) # all possible combinations of always formulas
+
+            # check which combinations have intersections of time intervals and act accordingly
+            for combo in combinations :
+                formulaI:StlTask       = formulas[combo[0]]
+                formulaJ:StlTask       = formulas[combo[1]]
+                intersection:TimeInterval = formulaI.time_interval / formulaJ.time_interval
+                
+                if not intersection.isEmpty() :
+                    if formulaJ.isParametric and not(formulaI.isParametric) : # parametric vs non-parameteric formula
+                        constraints  += formulaI.getConstraintFromInclusionOf(formulaJ)
+                        
+                    elif formulaI.isParametric and not(formulaJ.isParametric) :  
+                        constraints  += formulaJ.getConstraintFromInclusionOf(formulaI)
+                    
+                    elif formulaI.isParametric and formulaJ.isParametric : # if both parameteric include the one with shortest time into the one with longest time (this is our design choice)
+                        
+                        if formulaI.time_interval.period  >=  formulaJ.time_interval.period: # then include the formula J in I
+                            
+                            constraints  += formulaI.getConstraintFromInclusionOf(formulaJ)
+                        else :
+                            constraints  += formulaJ.getConstraintFromInclusionOf(formulaI)
+    
+                    else : # if both formulas are non-parameteric then we assume that the disgn of the initial specification was such that it was possible to satisfy them in the first place
+                        pass    
+        
+        
+        if len(eventuallyFormulas) :
+            for eventuallyFormula in eventuallyFormulas :
+                for alwaysFormula in alwaysFormulas :
+
+                    if eventuallyFormula.time_interval<=alwaysFormula.time_interval: # if the time interval of the always formulas includes the time interval of the eventually formula
+                        if alwaysFormula.isParametric :
+                            constraints  += alwaysFormula.getConstraintFromInclusionOf(eventuallyFormula)
+                            break # since the always are only intersecting, an eventually can be strictly included only in of of them. 
+                                # At most, there is another intersection with another always, but in this case there is no need for forcing the intersection.
+                                # In addition, if all the always have the same time interval, the we would eliminate redundant constraints by only putting the 
+                                # inclusion on one always since the always are also aready included into each other
+                         
+    return constraints
+
+
+def createCycleClosureConstraint(cycleEdgeObjs : List[EdgeTaskContainer],cycleEdges : List[Tuple[int,int]]) -> List[ca.MX] :
+
+    constraints = []
+    if len(cycleEdgeObjs)==0 :
+        return []
+    
+    cycleFormulas        : list[list[StlTask]] = [edge.task_list for edge in cycleEdgeObjs]
+    possibleCombinations : list[list[StlTask]] = itertools.product(*cycleFormulas) # all possible combinations of formulas closing a cycle 
+    stateSpaceDim        = cycleFormulas[0][0].predicate.stateSpaceDimension
+    for combination in possibleCombinations :
+        # each combination represent a combinaton of formulas that can possibly close the cycle
+        alwaysFormulasInCombination = [formula for formula in combination if formula.temporal_operator == "always" ]
+        eventuallyFormulasInCombination = [formula for formula in combination if formula.temporal_operator == "eventually" ]
+        if not allNonParametric(combination) :
+            
+            # Case 1: all always formulas 
+            if len(combination) == len(alwaysFormulasInCombination) and len(alwaysFormulasInCombination)!=0:
+                intervalIntersection : TimeInterval = computeTimeIntervalIntersection(alwaysFormulasInCombination)
+                
+                if not intervalIntersection.is_empty(): # if there is an intersection then add the constraints 
+                    # need to provide aprimate predicate first
+                    # this function will change the predicate in case the predicate in non parametric it will computed its cuboid approximation and replace the orginal predicate
+                    for formula in combination:
+                        if not formula.isParametric :
+                            formula.predicate.computeCuboidApproximation() # you need to make the replacement of the originaal predicate with its cuboid under-approximation
+                            print(formula.predicate.optimalApproximationCenter)
+                            print(formula.predicate.optimalApproximationNu)
+                    constraints += computeMinkowskiInclusionConstraintsForCycle(cycleFormulas = combination,stateSpaceDimension = stateSpaceDim,cycleEdges = cycleEdges)
+            
+            # Case 2:  case in which there are also eventually formulas 
+            else :
+                if len(eventuallyFormulasInCombination)  ==1 :
+                    eventuallyFormula    = eventuallyFormulasInCombination[0]
+                    intervalIntersection = computeTimeIntervalIntersection(alwaysFormulasInCombination)
+                    # check if the eventually is included in intervalIntersection
+                    if eventuallyFormula.time_interval <= intervalIntersection :
+                        for formula in combination:
+                            if not formula.isParametric :
+                                formula.predicate.computeCuboidApproximation() # you need to make the replacement of the originaal predicate with its cuboid under-approximation
+        
+                        constraints +=  computeMinkowskiInclusionConstraintsForCycle(cycleFormulas = combination,stateSpaceDimension = stateSpaceDim,cycleEdges = cycleEdges)
+                        
+                elif len(eventuallyFormulasInCombination)  >1 :    
+                    # now there is more than one eventually formula so try to check if all the eventually formulas have a single instant as time inteval : like [t,t] in the time interval
+                
+                    requiresConstraint = True
+                    intervalChecker = eventuallyFormulasInCombination[0].time_interval 
+                    for eventuallyFormula in eventuallyFormulasInCombination[1:] :  
+                        if not eventuallyFormula.time_interval.is_singular():    
+                            requiresConstraint = False
+                            break # in case even only one eventually formula has non-singular time interval (singular time interval means like [t,t]) then you don't need to add constraints
+                        else :
+                            if intervalChecker != eventuallyFormula.time_interval :  # in case the singular time interval is not the same as all the others then you don't need a constraint
+                                requiresConstraint = False
+                                break
+                
+                    if requiresConstraint :
+                        for formula in combination:
+                            if not formula.isParametric :
+                                formula.predicate.computeCuboidApproximation() # you need to make the replacement of the originaal predicate with its cuboid under-approximation
+        
+                        constraints +=  computeMinkowskiInclusionConstraintsForCycle(cycleFormulas = combination,stateSpaceDimension = stateSpaceDim,cycleEdges = cycleEdges)
+                else :
+                    pass
+              
+    return constraints
+
+
+def computeMinkowskiInclusionConstraintsForCycle(cycleFormulas:List[StlTask], cycleEdges:List[Tuple[int,int]],stateSpaceDimension : int ) -> List[ca.MX]:
+    
+    
+    constraints = []
+    numVertices = 2**stateSpaceDimension
+    
+            
+    # in case we select the mid point of the cycle (which must have at least 3 formulas because a minimum cycle is a triangle) 
+    midIndex           = int(len(cycleFormulas)/2)
+    leftFormulas       = cycleFormulas[0:midIndex]
+    rightFormulas      = cycleFormulas[midIndex:]
+    leftPathEdges      = cycleEdges[0:midIndex]
+    rightPathEdges     = cycleEdges[midIndex:]
+        
+    # compute respective Minkowski sum
+    leftVertices     = pathMinkowskiSumVertices(leftFormulas,leftPathEdges)
+    A,b              = minkowskiSumLinearRepresentation(rightFormulas,rightPathEdges)
+        
+    # now we are ready to add the inclusion constraint
+    for jj in range(numVertices) :
+        constraints += [A@(-leftVertices[:,jj])-b<=np.zeros((2*stateSpaceDimension))] # note the minus sign it is because you need the negative MinkowskySum to be included in the original minkowsky sum
+        
+
+    return constraints
+
+
+def minkowskiSumLinearRepresentation(listOfFormulas : List[StlTask], edgeList:List[Tuple[int,int]]) -> Tuple[ca.MX,ca.MX] :
+    """
+    Given a list of formulas and the corresponding edges directions of path over which the formulas are defined, we  
+    compute the matrix A and b representing the minkowski sum of the formulas along the given path 
+    such that the minkowsky sum can be represneted as the linear inequality Ax<=b
+    
+    """
+    
+    stateSpaceDimension  = listOfFormulas[0].predicate.stateSpaceDimension
+    center     = 0 # center of the hypercube
+    nuSum      = 0 # dimensions of the hypercube
+    
+
+    for formula,edgeTuple in zip(listOfFormulas,edgeList) :
+    
+        if formula.edgeTuple != edgeTuple and formula.edgeTuple!= (edgeTuple[1],edgeTuple[0]) :
+            raise ValueError("edge along the path is not maching the corresponding formula. Make sure that the edges order and the formulas order is correct")
+        
+        elif formula.edgeTuple != edgeTuple : # case in which the directions are not matching
+            if formula.isParametric :
+                center = center - formula.centerVar
+                nuSum  = nuSum  + formula.nuVar
+            else : # case in which the formula is not parameteric 
+                if formula.predicate._isApproximated :
+                    center = center - formula.predicate.optimalApproximationCenter
+                    nuSum  = nuSum  + formula.predicate.optimalApproximationNu
+                else :
+                    raise Exception("formula does not have an approximation available. PLease replace formula with its approximation before calling this method")
+        else : # case in which the directions are matching
+            if formula.isParametric :
+                center = center + formula.centerVar
+                nuSum  = nuSum  + formula.nuVar
+            else : # case in which the formula is not parameteric 
+                if formula.predicate._isApproximated :
+                    center = center + formula.predicate.optimalApproximationCenter
+                    nuSum  = nuSum  + formula.predicate.optimalApproximationNu
+                else :
+                    raise Exception("formula does not have an approximation available. PLease replace formula with its approximation before calling this method")
+        
+    A  = np.vstack((np.eye(stateSpaceDimension),-np.eye(stateSpaceDimension)))  # (face normals x hypercube stateSpaceDimension)
+    Ac = A@center
+    d  = ca.vertcat(nuSum/2,nuSum/2)
+    b  = Ac+d
+    return A,b
+
+
 def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, task_edges:List[Tuple], comm_info:Dict[str, Dict], start_position: Dict[int, np.ndarray], problemDimension = 2, maxInterRobotDistance = 3)-> nx.Graph: 
     """ Solves the task decomposition completely"""
     
     numberOfVerticesHypercube = 2**problemDimension
     originalTaskGraph = task_graph.copy()
     
-
+    
     pathsList                   : list[list[int]] = []
     pathConstraints             : list[ca.MX] = []
     overloadingConstraints      : list[ca.MX] = []
@@ -102,6 +415,7 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, task_edges:Lis
     decompositionOccurred = False
     decompositionSolved = []
 
+
     for task_name, (task_key, task_dict) in enumerate(comm_info.items()):
 
         edge = task_dict["EDGE"]
@@ -111,6 +425,7 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, task_edges:Lis
 
         if (not isCommunicating) and (has_tasks): 
             decompositionOccurred = True
+            task_graph.remove_edge(edge[0], edge[1]) # remove the edge from the graph
             
             # retrive all the formulas to be decomposed
             formulasToBeDecomposed: list[StlTask] = [task for task in edge_container.task_list]
@@ -128,7 +443,7 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, task_edges:Lis
 
 
                 originalTemporalOperator       = formula.temporal_operator                      # get time interval of the orginal operator
-                originalPredicate              = formula.predicate                    # get the predicate function
+                originalPredicate              = formula.predicate                              # get the predicate function
                 originalEdgeTuple              = tuple(formula.contributing_agents)             # get the edge tuple
                 
                 if originalEdgeTuple == (edge[0],edge[1]) : #case the direction is correct
@@ -143,14 +458,8 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, task_edges:Lis
                     subformula = StlTask(predicate=PredicateFunction(sourceNode=sourceNode, targetNode=targetNode), temporal_operator=originalTemporalOperator)
                     
                     # warm start of the variables involved in the optimization TODO: check if you have a better warm start base on the specification you have. Maybe some more intelligen heuristic
-                    # globalOptimizer.set_initial(subformula.centerVar , MASgraph.nodes[targetNode]["pos"]-MASgraph.nodes[sourceNode]["pos"]) 
-                    
                     globalOptimizer.set_initial(subformula.centerVar , start_position[sourceNode]-start_position[targetNode]) 
 
-# Unknown: Opti decision variable 'opti0_x_1' of shape 2x1, belonging to a different instance of Opti.
-# The error message "Opti decision variable 'opti0_x_1' of shape 2x1, belonging to a 
-# different instance of Opti" suggests that the variable `subformula.centerVar` you're trying to set the 
-# initial value for belongs to a different instance of the optimizer (`Opti`). 
 
                     globalOptimizer.set_initial(subformula.nuVar   , np.ones(problemDimension)*4)
 
@@ -172,8 +481,7 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, task_edges:Lis
                 # now set that the final i sum has to stay inside the original predicate
                 minowkySumVertices  = pathMinkowskiSumVertices( edgeSubformulas ,  edgesThroughPath)  # return the symbolic vertices f the hypercube to define the constraints
                 for jj in range(numberOfVerticesHypercube) :
-                    # ======= Does not Work with my predicates ========
-                    pathConstraints.append(originalPredicate.function(minowkySumVertices[:,jj])<=0) # for each vertex of the minkowski sum ensure they are inside the original predicate superlevel-set
+                    pathConstraints.append(originalPredicate.function_edge(minowkySumVertices[:,jj])<=0) # for each vertex of the minkowski sum ensure they are inside the original predicate superlevel-set
             
             decompositionSolved.append((path,edgeSubformulas))    
 
@@ -181,7 +489,8 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, task_edges:Lis
             edgesThroughPath = edgeSet(path=path) # find edges along the path
             # flag the edges applied for the optimization 
             for sourceNode,targetNode in   edgesThroughPath :
-                    task_graph.edges[sourceNode,targetNode]["edgeObj"].flagOptimizationInvolvement()
+                    task_graph[sourceNode][targetNode]["container"].flagOptimizationInvolvement()
+
             
             
     # # Now we check the cycle constraints on the graph as a first step and we then check the overloading constraints as a second step
@@ -190,66 +499,67 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, task_edges:Lis
     # noCommunication = [(i,j) for i,j,attr in edges if not attr["edgeObj"].isCommunicating] # because I have rewritten those specification
     # TaskGraph.remove_edges_from(noTaskEdges)
     # TaskGraph.remove_edges_from(noCommunication)
+
     
-    # if decompositionOccurred :
-    #     # adding cycles constraints to the optimization problem
-    #     cycles :list[list[int]]   = sorted(nx.simple_cycles(TaskGraph))
-    #     cycles = [cycle for cycle in cycles if len(cycle)>1] # eliminate self loopscycles)
-    #     for omega in cycles :
-    #         cycleEdges    = edgeSet(omega,isCycle=True)
-    #         cycleEdgesObj :list[list[GraphEdge]] = [graph.edges[i,j]["edgeObj"] for i,j in cycleEdges ] 
-    #         cyclesConstraints += createCycleClosureConstraint(cycleEdgeObjs=cycleEdgesObj,cycleEdges=cycleEdges)
+    if decompositionOccurred :
+        # adding cycles constraints to the optimization problem
+        cycles :list[list[int]]   = sorted(nx.simple_cycles(task_graph))
+        cycles = [cycle for cycle in cycles if len(cycle)>1] # eliminate self loopscycles)
+        for omega in cycles :
+            cycleEdges    = edgeSet(omega,isCycle=True)
+            cycleEdgesObj :list[list[EdgeTaskContainer]] = [task_graph[i][j]["container"] for i,j in cycleEdges ] 
+            cyclesConstraints += createCycleClosureConstraint(cycleEdgeObjs=cycleEdgesObj,cycleEdges=cycleEdges)
             
-    #     # now we compute the overloading constraints on a single objects
-    #     # one line of overloading constraints
-    #     optimisedEdges = [(i,j,edgeDict["edgeObj"]) for i,j,edgeDict in graph.edges(data=True) if edgeDict["edgeObj"].isInvolvedInOptimization]
-    #     for i,j,edgeObj in optimisedEdges  :
-    #         print(i,j)
-    #         overloadingConstraints += computeOverloadingConstraints(edgeObj)
+        # now we compute the overloading constraints on a single objects
+        # one line of overloading constraints
+        optimisedEdges = [(i,j) for i,j in task_graph.edges(data=True) if task_graph[i][j]["container"].involved_in_optimization] #list of edges that contain formulas that were created in the task decomposition 
+        for i,j in optimisedEdges:
+            print(i,j)
+            overloadingConstraints += computeOverloadingConstraints(edgeObj=task_graph[i][j]["container"])
         
                 
-    #     # #########################################################################################################
-    #     # # OPTIMIZATION
-    #     # #########################################################################################################
+        # #########################################################################################################
+        # # OPTIMIZATION
+        # #########################################################################################################
 
-    #     cost = 0 # compute cost for parameetric formulas
-    #     for i,j,edgeObj in optimisedEdges :
-    #         for formula in edgeObj.formulasList :
-    #             if formula.isParametric :
-    #                 cost = cost + 1/computeVolume(formula.nuVar)
+        cost = 0 # compute cost for parameetric formulas
+        for i,j in optimisedEdges:
+            for formula in task_graph[i][j]["container"].task_list:
+                if formula.isParametric :
+                    cost = cost + 1/computeVolume(formula.nuVar)
             
             
-    #     constraints = [*maxCommunicationConstraints,*positiveNuConstraint,*pathConstraints,*cyclesConstraints,*overloadingConstraints]
-    #     globalOptimizer.subject_to(constraints) # Maximum Distance of a constraint
+        constraints = [*maxCommunicationConstraints,*positiveNuConstraint,*pathConstraints,*cyclesConstraints,*overloadingConstraints]
+        globalOptimizer.subject_to(constraints) # Maximum Distance of a constraint
 
 
-    #     globalOptimizer.solver("ipopt")
-    #     solution = globalOptimizer.solve()
+        globalOptimizer.solver("ipopt")
+        solution = globalOptimizer.solve()
 
 
-    #     ###########################################################################################################
-    #     # PRINT SOLUTION
-    #     #########################################################################################################
+        ###########################################################################################################
+        # PRINT SOLUTION
+        #########################################################################################################
 
-    #     newFormulasCount = 0
-    #     for i,j,edgeObject in optimisedEdges :
-    #         newFormulasCount += len([formula for formula in edgeObject.formulasList if formula.isParametric])
+        # newFormulasCount = 0
+        # for i,j in optimisedEdges:
+        #     newFormulasCount += len([formula for formula in task_graph[i][j]["container"].task_list if formula.isParametric])
         
         
-    #     print("-----------------------------------------")   
-    #     print("Internal Report")   
-    #     print("-----------------------------------------")   
-    #     print(f"Total number of formulas created : {newFormulasCount}")   
-    #     print("---------Found Solution------------------") 
-    #     for path,formulas in decompositionSolved :   
-    #         print("path: ",path)
-    #         for formula in formulas:
-    #             print("edge      : (" + str(formula.sourceNode)+ "," + str(formula.targetNode) + ")")
-    #             print("vector    : "+ str(solution.value(formula.centerVar)))
-    #             print("dimension : "+ str(solution.value(formula.nuVar)))
-    #             print("formua ID : " + str(id(formula)))
-    #             print("Operator  : "+ formula.temporalOperator)
-    #             # turn predicates from parameteric to no parameteric
+        # print("-----------------------------------------")   
+        # print("Internal Report")   
+        # print("-----------------------------------------")   
+        # print(f"Total number of formulas created : {newFormulasCount}")   
+        # print("---------Found Solution------------------") 
+        # for path,formulas in decompositionSolved :   
+        #     print("path: ",path)
+        #     for formula in formulas:
+        #         print("edge      : (" + str(formula.sourceNode)+ "," + str(formula.targetNode) + ")")
+        #         print("vector    : "+ str(solution.value(formula.centerVar)))
+        #         print("dimension : "+ str(solution.value(formula.nuVar)))
+        #         print("formua ID : " + str(id(formula)))
+        #         print("Operator  : "+ formula.temporalOperator)
+        #         # turn predicates from parameteric to no parameteric
                 
                 
-    return task_graph#TaskGraph
+    return task_graph

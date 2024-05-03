@@ -111,6 +111,7 @@ class PredicateFunction :
     """
     def __init__(self,
                  function: ca.Function = None,
+                 function_edge: ca.Function = None,
                  stateSpaceDimension: int = 2,
                  computeApproximation = False,
                  sourceNode: int = None,
@@ -118,6 +119,7 @@ class PredicateFunction :
         
 
         self._function = function
+        self.function_edge = function_edge
         self._dim = stateSpaceDimension
 
         
@@ -140,6 +142,8 @@ class PredicateFunction :
             self._isParametric = 1
             self._sourceNode = sourceNode
             self._targetNode = targetNode
+            self._edgeTuple = (sourceNode, targetNode)
+            self._contributing_agents = [sourceNode, targetNode]
                 
             
         self._isApproximated               = False
@@ -188,7 +192,7 @@ class PredicateFunction :
     @property
     def optimalApproximationNu(self) :
         return self._optimalApproximationNu 
-    
+
 
     def computeBestCuboidApproximation(self) :
         """computes the best cuboid approximation of the predicate function.
@@ -245,6 +249,15 @@ class PredicateFunction :
             self._optimalApproximationNu = self._optimalApproximationNu[:,np.newaxis]
     
 
+    def computeCuboidApproximation(self) :
+        """
+        This function is called in case the original predicate needs to be replaced with an under approximation of it
+        """
+        if not self._isApproximated : # if the approximation was not computed before at the creation of the instance then create it now
+            self.computeBestCuboidApproximation()
+            self._isApproximated = True
+        
+
     def hypercubeVertices(self,source:int,target:int) :
         
         if self.hasUndefinedDirection :
@@ -268,6 +281,53 @@ class PredicateFunction :
             raise NotImplementedError("formula is not parametric so you cannot quary any vertex through this function. If you wanted to get the best cuboid underappriximation, please check the property optimalApproximationVertices")
         
         return parametericHypercubeVertices
+    
+    def linearRepresentationHypercube(self,source:int,target:int) :
+        """returns linear representation of the parameteric function as Ax<=b"""
+        if self.hasUndefinedDirection :
+            raise NotImplementedError("predicate has undefined direction. Only if you define a target and source you can obtain the hypercube vertices")
+        
+        if (self.edgeTuple != (source,target)) and (self.edgeTuple != (target,source)) : # this happens if the edge is not the same at all
+                raise NotImplementedError("the given source\\target pair dies not match the edge of the predicate")
+        
+        if self.isParametric : # parametric case
+            
+            # A(x-c) - b <= 0
+            if self.edgeTuple == (source,target) :
+                A  = np.vstack((np.eye(self.stateSpaceDimension),-np.eye(self.stateSpaceDimension)))  # (face normals x hypercube stateSpaceDimension)
+                Ac = A@self._centerVar
+                d  = ca.vertcat(self.nuVar/2,self.nuVar/2)
+                b  = Ac+d
+                return A,b
+                
+            else :
+                A  = np.vstack((np.eye(self.stateSpaceDimension),-np.eye(self.stateSpaceDimension)))  # (face normals x hypercube stateSpaceDimension)
+                Ac = A@(-self._centerVar)
+                d  = ca.vertcat(self.nuVar/2,self.nuVar/2)
+                b  = Ac+d
+                return A,b
+                         
+        else :
+            
+            if self._isApproximated :
+            
+                # A(x-c) - b <= 0
+                if self.edgeTuple == (source,target) :
+                    A  = np.vstack((np.eye(self.stateSpaceDimension),-np.eye(self.stateSpaceDimension)))  # (face normals x hypercube stateSpaceDimension)
+                    Ac = A@(self._optimalApproximationCenter)
+                    d  = ca.vertcat(self.optimalApproximationNu/2,self.optimalApproximationNu/2)
+                    b  = Ac+d
+                    return A,b
+                    
+                else :
+                    A  = np.vstack((np.eye(self.stateSpaceDimension),-np.eye(self.stateSpaceDimension)))  # (face normals x hypercube stateSpaceDimension)
+                    Ac = A@(-self._optimalApproximationCenter)
+                    d  = ca.vertcat(self.optimalApproximationNu/2,self.optimalApproximationNu/2)
+                    b  = Ac+d
+                    return A,b
+            else :
+                raise Exception("current formula is not paranetric and does not have an availble linear approximation. Please provide one by calling the appropriate method")
+    
     
 
 
@@ -605,47 +665,97 @@ class EventuallyOperator(TemporalOperator):
 
 @dataclass(unsafe_hash=True)
 class StlTask :
-    """
-    Signal Temporal Logic Task container class. This class is applied to store information about a given STL task like the predicate 
-    the time interval of the task and the temporal operator
-    
-    Args:
-        temporal_operator (Operator) : the temporal operator of the task
-        predicate (PredicateFunction) : the predicate function of the task
-        name
-        
-    """  
+    def __init__(self,predicate:PredicateFunction,temporal_operator:TemporalOperator) -> None:
          
-    predicate              : PredicateFunction 
-    temporal_operator      : TemporalOperator  
-    name                   : str              = None    
+        self._predicate              : PredicateFunction = predicate
+        self._temporal_operator      : AlwaysOperator  = temporal_operator #TemporalOperator
+        self._name                   : str              = None    
     
+    @property
+    def predicate(self):
+        return self._predicate
+    @property
+    def temporal_operator(self):
+        return self._temporal_operator
+    @property
+    def time_interval(self):
+        return self._temporal_operator.time_interval
     @property
     def predicate_function(self):
-        return self.predicate.function
+        return self._predicate.function
+    @property
+    def isParametric(self):
+        return self._predicate.isParametric
     @property
     def contributing_agents(self):
-        return self.predicate.contributing_agents
+        return self._predicate.contributing_agents
     @property
     def centerVar(self):
-        return self.predicate.centerVar
+        return self._predicate.centerVar
     @property
     def nuVar(self):
-        return self.predicate.nuVar
+        return self._predicate.nuVar
     @property
     def sourceNode(self):
-        return self.predicate.contributing_agents[0]
+        return self._predicate.contributing_agents[0]
     @property
     def targetNode(self):
-        return self.predicate.contributing_agents[1]
+        return self._predicate.contributing_agents[1]
     @property
     def edgeTuple(self):
-        return self.predicate.edgeTuple
+        return self._predicate.edgeTuple
     
     def getHypercubeVertices(self,sourceNode,targetNode:int) -> List[ca.MX]:
         """ computes vertices of hypercube as function of the centerVar and the dimension vector nuVar"""
         
         return self.predicate.hypercubeVertices(source=sourceNode,target=targetNode)
+    
+    def computeLinearHypercubeRepresentation(self,sourceNode:int,targetNode:int) -> Tuple[ca.MX,ca.MX] :
+        """returns linear representation of the parameteric function as Ax<=b"""
+        A,b = self._predicate.linearRepresentationHypercube(source=sourceNode,target=targetNode)
+        return A,b
+    
+    def getConstraintFromInclusionOf(self,formula : 'StlTask') -> List[ca.MX]:
+        """ returns inclusion constraints for "formula" inside the of the self formula instance """
+        if not isinstance(formula,StlTask) :
+            raise ValueError("input formula must be an instance of STL formula")
+        # two cases :
+        # 1) parameteric vs parametric
+        # 2) parameteric vs non-parameteric
+        numVertices = 2**self.predicate.stateSpaceDimension
+        constraints = []
+        
+        if formula.isParametric and self.isParametric :
+            
+            source,target = self.edgeTuple
+            # get the represenations of both formulas with the right verse of the edge
+            vertices      = formula.getHypercubeVertices(sourceNode=source,targetNode=target)
+            A,b           = self.computeLinearHypercubeRepresentation(sourceNode=source,targetNode=target)
+            constraints = []
+            for jj in range(numVertices) : # number of vertices of hypercube is computable given the stateSpaceDimension of the problem
+                constraints +=[ A@vertices[:,jj]-b<=np.zeros((self.predicate.stateSpaceDimension*2,1))]
+                
+        elif  formula.isParametric and (not self.isParametric) :
+            source,target = self.edgeTuple # check the direction of definition
+            
+            if (formula.edgeTuple != self.edgeTuple) and (formula.edgeTuple != (target,source)) : # this happens if the edge is not the same at all
+                raise NotImplementedError("It seems that you are trying to make an inclusion between two formulas that are not part of the same edge. This is not support for now")
+            
+            vertices    = formula.getHypercubeVertices(sourceNode=source,targetNode=target)
+            constraints = []
+            
+            if self._predicate._isApproximated : # in this case the predicate was approximated so you can do all of this with linear hyperplanes 
+                A,b = self.computeLinearHypercubeRepresentation(sourceNode=source,targetNode=target)
+                for jj in range(numVertices) : # number of vertices of hypercube is computable given the stateSpaceDimension of the problem
+                    constraints +=[ A@vertices[:,jj] - b<=0 ] 
+            else :
+                for jj in range(numVertices) : # number of vertices of hypercube is computable given the stateSpaceDimension of the problem
+                    constraints +=[ self._predicate.function(vertices[:,jj])<=0 ] 
+                
+        elif (not formula.isParametric) and self.isParametric :  
+            raise NotImplementedError("Trying to include a non parameteric formula inside a parameteroc one. Not supported")
+        
+        return constraints
     
 
 
@@ -692,14 +802,19 @@ def epsilon_position_closeness_predicate(epsilon:float, agent_i:Agent, agent_j:A
     if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
         raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
     
-    
+    edge = ca.MX.sym("edge", 2, 1)
     predicate_expression =  ( epsilon**2 - ca.sumsqr(agent_i.symbolic_state - agent_j.symbolic_state) ) # the scaling will make the time derivative smaller whe you built the barrier function
+    predicate_expression_edge = ( epsilon**2 - ca.sumsqr(edge) )
     predicate            = ca.Function("position_epsilon_closeness",[agent_i.symbolic_state, agent_j.symbolic_state],
                                                                     [predicate_expression],
                                                                     ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
                                                                     ["value"]) # this defined an hyperplane function
+    predicate_edge            = ca.Function("position_epsilon_closeness_edge",[edge],
+                                                                    [predicate_expression_edge],
+                                                                    ["edge_"+str(agent_i.id)+str(agent_j.id)],
+                                                                    ["value"]) # this defined an hyperplane function
 
-    return PredicateFunction(function=predicate)
+    return PredicateFunction(function=predicate, function_edge=predicate_edge)
 
 
 def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_pos:np.ndarray, direction_i_to_j:bool=True) ->PredicateFunction:
@@ -723,17 +838,24 @@ def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_po
     if relative_pos.shape[0] != agent_i.symbolic_state.shape[0]:
         raise ValueError("The relative position vector must have the same dimension as the position of the agents. Agents have position dimension " + str(agent_i.symbolic_state.shape) + " and the relative position vector has dimension " + str(relative_pos.shape) )
     
+    edge = ca.MX.sym("edge", 2, 1)
     if direction_i_to_j :
         predicate_expression =  ( epsilon**2 - (agent_j.symbolic_state - agent_i.symbolic_state- relative_pos).T@(agent_j.symbolic_state-agent_i.symbolic_state - relative_pos) ) # the scaling will make the time derivative smaller whe you built the barrier function
+        
     else :
         predicate_expression =  ( epsilon**2 - (agent_i.symbolic_state - agent_j.symbolic_state- relative_pos).T@(agent_i.symbolic_state-agent_j.symbolic_state - relative_pos) )
     
+    predicate_expression_edge = ( epsilon**2 - (edge-relative_pos).T@(edge-relative_pos) )
     predicate            = ca.Function("position_epsilon_closeness",[agent_i.symbolic_state,agent_j.symbolic_state],
                                                                     [predicate_expression],
                                                                     ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
                                                                     ["value"]) # this defined an hyperplane function
+    predicate_edge            = ca.Function("position_epsilon_closeness_edge",[edge],
+                                                                    [predicate_expression_edge],
+                                                                    ["edge_"+str(agent_i.id)+str(agent_j.id)],
+                                                                    ["value"]) # this defined an hyperplane function
 
-    return PredicateFunction(function=predicate)
+    return PredicateFunction(function=predicate, function_edge=predicate_edge)
 
 
 def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha_function:ca.Function=None)-> BarrierFunction :
