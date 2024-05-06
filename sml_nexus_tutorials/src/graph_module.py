@@ -37,13 +37,19 @@ from   dataclasses import dataclass,field
 # recall that mutable objects remain mutable even of the class is frozen
 @dataclass(unsafe_hash=True)
 class EdgeTaskContainer:
+    _edge_tuple: Tuple[UniqueIdentifier,UniqueIdentifier]
+    _weight: float = 1
+    _task_list: List[StlTask] = field(default_factory=list)
+    _involved_in_optimization: int = 0
 
-    def __init__(self, edge_tuple: Tuple[UniqueIdentifier,UniqueIdentifier], weight: float = 1, task_list: List[StlTask] = []):
 
-        self._edge_tuple                    : Tuple[UniqueIdentifier,UniqueIdentifier] = edge_tuple
-        self._weight                        : float       = 1
-        self._task_list                     : List[StlTask] = field(default_factory=list)
-        self._involved_in_optimization      : int         = 0
+    def __init__(self, edge_tuple: Tuple[UniqueIdentifier,UniqueIdentifier] = None, weight: float = None, task_list: List[StlTask] = None, involved_in_optimization: int = None):
+
+        self._edge_tuple = edge_tuple if edge_tuple is not None else (UniqueIdentifier(), UniqueIdentifier())
+        self._weight = weight if weight is not None else 1
+        self._task_list = task_list if task_list is not None else []
+        self._involved_in_optimization = involved_in_optimization if involved_in_optimization is not None else 0
+
 
     @property
     def edge_tuple(self):
@@ -104,6 +110,10 @@ def create_communication_graph_from_states(states: List[int], communication_info
     comm_graph = nx.Graph()
     comm_graph.add_nodes_from(states)
 
+    # Add self-loops
+    for node in states:
+        comm_graph.add_edge(node, node)
+
     for task_info in communication_info.values():
         if task_info["COMMUNICATE"]:
             edge = task_info["EDGE"]
@@ -128,10 +138,26 @@ def create_task_graph_from_edges(edge_list: Union[List[EdgeTaskContainer], List[
     """
     task_graph = nx.Graph()
     for edge in edge_list:
-        if isinstance(edge, EdgeTaskContainer):
-            task_graph.add_edge(edge.edge_tuple[0], edge.edge_tuple[1])
-            task_graph[edge.edge_tuple[0]][edge.edge_tuple[1]]["container"] = edge
-        else:
-            task_graph.add_edge(edge[0], edge[1])
-            task_graph[edge[0]][edge[1]]["container"] = EdgeTaskContainer(edge_tuple=edge)
+        task_graph.add_edge(edge[0], edge[1], container=EdgeTaskContainer(edge_tuple=edge))
     return task_graph
+
+
+# def create_task_graph_from_edges(edge_list: Union[List[EdgeTaskContainer], List[Tuple[UniqueIdentifier, UniqueIdentifier]]]) -> nx.Graph:
+#     """
+#     Create a task graph from a list of edges.
+
+#     Args :
+#     - edge_list: A list of edges represented either as EdgeTaskContainer objects or tuples of integers.
+
+#     Returns:
+#     - task_graph: A networkx Graph object representing the task graph.
+
+#     """
+#     task_graph = nx.Graph()
+#     for edge in edge_list:
+#         if isinstance(edge, EdgeTaskContainer):
+#             task_graph.add_edge(edge.edge_tuple[0], edge.edge_tuple[1])
+#             task_graph[edge.edge_tuple[0]][edge.edge_tuple[1]]["container"] = edge
+#         else:
+#             task_graph.add_edge(edge[0], edge[1], container=EdgeTaskContainer(edge_tuple=edge))
+#     return task_graph

@@ -89,6 +89,7 @@ class Controller():
         # Create the constraints for the optimization problem --- 'g' ---
         self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
         barrier_constraints = self.generate_barrier_constraints(self.relevant_barriers)
+        rospy.loginfo(f"Slack variables: {self.slack_variables}")
         slack_constraints = - ca.vertcat(*list(self.slack_variables.values()))
         constraints = ca.vertcat(barrier_constraints, slack_constraints)
 
@@ -139,11 +140,11 @@ class Controller():
 
             # Create load sharing for different constraints
             if neighbour_id == self.agent_id:
-                slack = ca.MX.sym('slack', 1)
+                slack = ca.MX.sym(f"slack", 1)
                 self.slack_variables[self.agent_id] = slack
                 load_sharing = 1
             else:
-                slack = ca.MX.sym('slack', 1)
+                slack = ca.MX.sym(f"slack", 1)
                 self.slack_variables[neighbour_id] = slack  
                 load_sharing = 0.1
 

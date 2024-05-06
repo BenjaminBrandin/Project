@@ -110,17 +110,24 @@ class PredicateFunction :
     PredicateFunction definition class. This class is used to store the information about a predicate function. The class is used to store the predicate function and the contributing agents to the satisfaction of the predicate function.
     """
     def __init__(self,
-                 function: ca.Function = None,
-                 function_edge: ca.Function = None,
-                 stateSpaceDimension: int = 2,
+                 function_name: str,
+                 function: ca.Function,
+                 function_edge: ca.Function,
+                 stateSpaceDimension: int = 2, # change later so it is not static
                  computeApproximation = False,
                  sourceNode: int = None,
-                 targetNode: int = None) -> None:
+                 targetNode: int = None,
+                 center: List[int] = None,
+                 epsilon: float = None) -> None:
         
-
+        self._function_name = function_name
         self._function = function
-        self.function_edge = function_edge
+        self._function_edge = function_edge
         self._dim = stateSpaceDimension
+
+        # This is stand-in values for the task_msg
+        self._epsilon = epsilon if epsilon is not None else 1
+        self._center = center if center is not None else [0, 0]
 
         
         if self._function != None:
@@ -128,12 +135,14 @@ class PredicateFunction :
             self._centerVar = None
             self._nuVar = None
             self._etaVar = None
+
             self._contributing_agents = [get_id_from_input_name(name) for name in self._function.name_in()]
             if len(self._contributing_agents) > 1:
                 self._sourceNode, self._targetNode = self._contributing_agents[:2]
             else:
                 self._sourceNode = self._targetNode = self._contributing_agents[0]
             self._edgeTuple = (self._sourceNode, self._targetNode)
+
         else:
             # Create hypercube parameters since the formula is parametric
             self._centerVar = globalOptimizer.variable(self._dim, 1)  # casadi.Opti.variable() edge Casadi Variable for optimization
@@ -159,9 +168,20 @@ class PredicateFunction :
     def function(self) :
         return self._function
     @property
+    def function_name(self) :
+        return self._function_name
+    @property
+    def function_edge(self) :
+        return self._function_edge
+    @property
     def contributing_agents(self):
         return self._contributing_agents
-    
+    @property
+    def epsilon(self):
+        return self._epsilon
+    @property
+    def center(self):
+        return self._center
     @property
     def stateSpaceDimension(self) :
         return self._dim
@@ -611,12 +631,22 @@ class TemporalOperator(ABC):
     def time_of_remotion(self) -> float:
         pass
     
+    @property
+    @abstractmethod
+    def time_interval(self) -> TimeInterval:
+        pass
+
+    @property
+    @abstractmethod
+    def temporal_type(self) -> str:
+        pass
 
 class AlwaysOperator(TemporalOperator):
-    def __init__(self,time_interval:TimeInterval) -> None:
+    def __init__(self,time_interval:TimeInterval, temporal_type: str = "AlwaysOperator") -> None:
         self._time_interval         : TimeInterval = time_interval
-        self._time_of_satisfaction   : float        = self._time_interval.a
+        self._time_of_satisfaction  : float        = self._time_interval.a
         self._time_of_remotion      : float        = self._time_interval.b
+        self._temporal_type         : str          = temporal_type
     
     @property
     def time_of_satisfaction(self) -> float:
@@ -627,10 +657,13 @@ class AlwaysOperator(TemporalOperator):
     @property
     def time_interval(self) -> TimeInterval:
         return self._time_interval  
+    @property
+    def temporal_type(self) -> str:
+        return self._temporal_type
     
     
 class EventuallyOperator(TemporalOperator):
-    def __init__(self,time_interval:TimeInterval,time_of_satisfaction:float=None) -> None:
+    def __init__(self,time_interval:TimeInterval,time_of_satisfaction:float=None, temporal_type: str = "EventuallyOperator") -> None:
         """ Eventually operator
         Args:
             time_interval (TimeInterval): time interval that referes to the eventually operator
@@ -642,6 +675,7 @@ class EventuallyOperator(TemporalOperator):
         self._time_interval       : TimeInterval = time_interval
         self._time_of_satisfaction : float       = time_of_satisfaction
         self._time_of_remotion    : float        = self._time_interval.b
+        self._temporal_type       : str          = temporal_type
         
         if time_of_satisfaction == None :
             self._time_of_satisfaction = time_interval.a + np.random.rand()*(time_interval.b- time_interval.a)
@@ -660,23 +694,38 @@ class EventuallyOperator(TemporalOperator):
     @property
     def time_interval(self) -> TimeInterval:
         return self._time_interval    
+    @property
+    def temporal_type(self) -> str:
+        return self._temporal_type
 
 
 
 @dataclass(unsafe_hash=True)
 class StlTask :
-    def __init__(self,predicate:PredicateFunction,temporal_operator:TemporalOperator) -> None:
+    def __init__(self,predicate:PredicateFunction = None,temporal_operator:TemporalOperator = None) -> None:
          
-        self._predicate              : PredicateFunction = predicate
-        self._temporal_operator      : AlwaysOperator  = temporal_operator #TemporalOperator
-        self._name                   : str              = None    
+        self._predicate              = predicate if predicate is not None else PredicateFunction
+        self._temporal_operator      = temporal_operator if temporal_operator is not None else TemporalOperator
+
     
     @property
     def predicate(self):
         return self._predicate
     @property
+    def type(self):
+        return self._predicate.function_name
+    @property
+    def epsilon(self):
+        return self._predicate.epsilon
+    @property
+    def center(self):
+        return self._predicate.center
+    @property
     def temporal_operator(self):
         return self._temporal_operator
+    @property
+    def temporal_type(self):
+        return self._temporal_operator.temporal_type
     @property
     def time_interval(self):
         return self._temporal_operator.time_interval
@@ -750,7 +799,7 @@ class StlTask :
                     constraints +=[ A@vertices[:,jj] - b<=0 ] 
             else :
                 for jj in range(numVertices) : # number of vertices of hypercube is computable given the stateSpaceDimension of the problem
-                    constraints +=[ self._predicate.function(vertices[:,jj])<=0 ] 
+                    constraints +=[ self._predicate.function_edge(vertices[:,jj])<=0 ] 
                 
         elif (not formula.isParametric) and self.isParametric :  
             raise NotImplementedError("Trying to include a non parameteric formula inside a parameteroc one. Not supported")
@@ -765,6 +814,9 @@ class StlTask :
 
 
 def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, agent:Agent) ->PredicateFunction:
+
+    array_to_list = goal.tolist()  # Convert NumPy array to Python list
+    goal_list = [int(x) for x in array_to_list]  # Convert elements to integers
     
     if agent.symbolic_state.numel() != goal.size:
         raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent.symbolic_state.s) + " and " + str(goal.size) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
@@ -773,14 +825,19 @@ def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, agent:Agent) ->Predi
     if len(goal.shape) <2 :
         goal = goal[:,np.newaxis]
         
-        
+    edge = ca.MX.sym(f"edge_{agent.id}{agent.id}", 2, 1)
+
     predicate_expression = ( epsilon**2 - ca.dot((agent.symbolic_state - goal),(agent.symbolic_state-goal)) ) # the scaling will make the time derivative smaller whe you built the barrier function
+    predicate_expression_edge = ( epsilon**2 - ca.dot((edge - goal),(edge-goal)) )
+
     predicate            = ca.Function("position_epsilon_closeness",[agent.symbolic_state],
                                                                     [predicate_expression],
                                                                     ["state_"+str(agent.id)],
                                                                     ["value"]) # this defined an hyperplane function
+    predicate_edge            = ca.Function("position_epsilon_closeness_edge",[edge],
+                                                                    [predicate_expression_edge]) # this defined an hyperplane function
 
-    return PredicateFunction(function=predicate)
+    return PredicateFunction(function_name="go_to_goal_predicate_2d", function=predicate, function_edge=predicate_edge, center=goal_list, epsilon=epsilon)
 
 
 def epsilon_position_closeness_predicate(epsilon:float, agent_i:Agent, agent_j:Agent) ->PredicateFunction: # Does not need to be called state_1 and state_2
@@ -802,19 +859,18 @@ def epsilon_position_closeness_predicate(epsilon:float, agent_i:Agent, agent_j:A
     if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
         raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
     
-    edge = ca.MX.sym("edge", 2, 1)
+    edge = ca.MX.sym(f"edge_{agent_i.id}{agent_j.id}", 2, 1)
     predicate_expression =  ( epsilon**2 - ca.sumsqr(agent_i.symbolic_state - agent_j.symbolic_state) ) # the scaling will make the time derivative smaller whe you built the barrier function
     predicate_expression_edge = ( epsilon**2 - ca.sumsqr(edge) )
     predicate            = ca.Function("position_epsilon_closeness",[agent_i.symbolic_state, agent_j.symbolic_state],
                                                                     [predicate_expression],
                                                                     ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
                                                                     ["value"]) # this defined an hyperplane function
-    predicate_edge            = ca.Function("position_epsilon_closeness_edge",[edge],
-                                                                    [predicate_expression_edge],
-                                                                    ["edge_"+str(agent_i.id)+str(agent_j.id)],
-                                                                    ["value"]) # this defined an hyperplane function
 
-    return PredicateFunction(function=predicate, function_edge=predicate_edge)
+    predicate_edge          = ca.Function("position_epsilon_closeness_edge",[edge],
+                                                                    [predicate_expression_edge]) # this defined an hyperplane function
+
+    return PredicateFunction(function_name="epsilon_position_closeness_predicate", function=predicate, function_edge=predicate_edge, epsilon=epsilon)
 
 
 def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_pos:np.ndarray, direction_i_to_j:bool=True) ->PredicateFunction:
@@ -831,6 +887,8 @@ def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_po
     Returns:
         PredicateFunction : the predicate function 
     """
+    array_to_list = relative_pos.tolist()  # Convert NumPy array to Python list
+    relative_pos_list = [int(x) for x in array_to_list]  # Convert elements to integers
 
     if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
         raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
@@ -838,25 +896,23 @@ def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_po
     if relative_pos.shape[0] != agent_i.symbolic_state.shape[0]:
         raise ValueError("The relative position vector must have the same dimension as the position of the agents. Agents have position dimension " + str(agent_i.symbolic_state.shape) + " and the relative position vector has dimension " + str(relative_pos.shape) )
     
-    edge = ca.MX.sym("edge", 2, 1)
+    edge = ca.MX.sym(f"edge_{agent_i.id}{agent_j.id}", 2, 1)
     if direction_i_to_j :
         predicate_expression =  ( epsilon**2 - (agent_j.symbolic_state - agent_i.symbolic_state- relative_pos).T@(agent_j.symbolic_state-agent_i.symbolic_state - relative_pos) ) # the scaling will make the time derivative smaller whe you built the barrier function
         
     else :
         predicate_expression =  ( epsilon**2 - (agent_i.symbolic_state - agent_j.symbolic_state- relative_pos).T@(agent_i.symbolic_state-agent_j.symbolic_state - relative_pos) )
-    
+
     predicate_expression_edge = ( epsilon**2 - (edge-relative_pos).T@(edge-relative_pos) )
     predicate            = ca.Function("position_epsilon_closeness",[agent_i.symbolic_state,agent_j.symbolic_state],
                                                                     [predicate_expression],
                                                                     ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
                                                                     ["value"]) # this defined an hyperplane function
-    predicate_edge            = ca.Function("position_epsilon_closeness_edge",[edge],
-                                                                    [predicate_expression_edge],
-                                                                    ["edge_"+str(agent_i.id)+str(agent_j.id)],
-                                                                    ["value"]) # this defined an hyperplane function
 
-    return PredicateFunction(function=predicate, function_edge=predicate_edge)
+    predicate_edge          = ca.Function("position_epsilon_closeness_edge",[edge],
+                                                                    [predicate_expression_edge]) # this defined an hyperplane function
 
+    return PredicateFunction(function_name="formation_predicate", function=predicate, function_edge=predicate_edge,center=relative_pos_list, epsilon=epsilon)
 
 def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha_function:ca.Function=None)-> BarrierFunction :
     """
