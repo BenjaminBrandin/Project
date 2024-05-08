@@ -5,13 +5,14 @@ import rospy
 import copy
 import tf2_ros
 import tf2_geometry_msgs
-from builders import BarrierFunction, Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, create_barrier_from_task, go_to_goal_predicate_2d, formation_predicate, epsilon_position_closeness_predicate
+from builders import BarrierFunction, Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, create_barrier_from_task, go_to_goal_predicate_2d, formation_predicate, epsilon_position_closeness_predicate, conjunction_of_barriers
 from typing import List, Dict
 import casadi as ca
 import casadi.tools as ca_tools
 import numpy as np
 from geometry_msgs.msg import Twist, PoseStamped, TransformStamped, Vector3Stamped
 from custom_msg.msg import task_msg
+from std_msgs.msg import Int32
 
 
 class Controller():
@@ -27,8 +28,6 @@ class Controller():
         self.scale_factor = 3
         self.dummy_scalar = ca.MX.sym('dummy_scalar', 1)
         self.alpha_fun = ca.Function('alpha_fun', [self.dummy_scalar], [self.scale_factor * self.dummy_scalar])
-
-        # Nabla variables
         self.nabla_funs = []
         self.nabla_inputs = []
 
@@ -42,18 +41,18 @@ class Controller():
         self.agents = {}
         self.total_agents = rospy.get_param('~num_robots')
         
-
         # Barriers and tasks
         self.barriers = []
         self.task = task_msg()
+        self.task_msg_list = []
+        self.total_tasks = 100
 
         # Velocity Command Message
         self.max_velocity = 5
         self.vel_cmd_msg = Twist()
 
-        
-
         # Setup subscribers
+        rospy.Subscriber("/numOfTasks", Int32, self.numOfTasks_callback)
         rospy.Subscriber("/tasks", task_msg, self.task_callback)
         rospy.Subscriber("/qualisys/"+self.agent_name+"/pose", PoseStamped, self.pose_callback)
         for id in range(1, self.total_agents+1):
@@ -70,14 +69,68 @@ class Controller():
             rospy.loginfo("Wait for transform to be available")
             rospy.sleep(1)
 
+
         # Wait until all the task messages have been received |Find a better way to do this|
-        while len(self.barriers) < 3:
+        while len(self.task_msg_list) < self.total_tasks:
             rospy.sleep(1)
 
-        # Initialize the optimization problem
+        # Create the tasks and the barriers
+        self.barriers = self.create_task(self.task_msg_list)
         self.solver = self.get_qpsolver_and_parameter_structure()
         self.control_loop()
 
+
+    def conjunction_on_same_edge(self, barriers:List[BarrierFunction]) -> List[BarrierFunction]:
+        new_barriers = []
+        barriers_dict: Dict[tuple, List[BarrierFunction]] = {}
+
+        # create the conjunction of the barriers on the same edge
+        for barrier in barriers:
+            edge = tuple(sorted(barrier.contributing_agents))
+            if edge in barriers_dict:
+                barriers_dict[edge].append(barrier)
+            else:
+                barriers_dict[edge] = [barrier]
+
+        for barrier_list in barriers_dict.values():
+            if len(barrier_list) > 1:
+                new_barriers += [conjunction_of_barriers(barrier_list=barrier_list, associated_alpha_function=self.alpha_fun)]
+            else:
+                new_barriers += barrier_list
+
+        return new_barriers
+
+
+    def create_task(self, messages:List[task_msg]):
+        barriers_list = []
+
+        for message in messages:
+
+            # Create the predicate based on the type of the task
+            if message.type == "go_to_goal_predicate_2d":
+                predicate = go_to_goal_predicate_2d(goal=np.array(message.center), epsilon=message.epsilon, agent=self.agents[message.involved_agents[0]])
+            elif message.type == "formation_predicate":
+                predicate = formation_predicate(epsilon=message.epsilon, agent_i=self.agents[message.involved_agents[0]], agent_j=self.agents[message.involved_agents[1]], relative_pos=np.array(message.center))
+            elif message.type == "epsilon_position_closeness_predicate":
+                predicate = epsilon_position_closeness_predicate(epsilon=message.epsilon, agent_i=self.agents[message.involved_agents[0]], agent_j=self.agents[message.involved_agents[1]])
+
+            # Create the temporal operator
+            if message.temp_op == "AlwaysOperator":
+                temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=message.interval[0], b=message.interval[1]))
+            elif message.temp_op == "EventuallyOperator":
+                temporal_operator = EventuallyOperator(time_interval=TimeInterval(a=message.interval[0], b=message.interval[1]))
+
+            # Create the task
+            task = StlTask(predicate=predicate, temporal_operator=temporal_operator)
+
+            # Add the task to the barriers and the edge
+            initial_conditions = [self.agents[i] for i in message.involved_agents]
+            barriers_list += [create_barrier_from_task(task=task, initial_conditions=initial_conditions, alpha_function=self.alpha_fun)]
+        
+        barriers_list = self.conjunction_on_same_edge(barriers_list)
+
+        return barriers_list
+    
 
     def get_qpsolver_and_parameter_structure(self):
         # Create the parameter structure for the optimization problem --- 'p' ---
@@ -89,7 +142,6 @@ class Controller():
         # Create the constraints for the optimization problem --- 'g' ---
         self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
         barrier_constraints = self.generate_barrier_constraints(self.relevant_barriers)
-        rospy.loginfo(f"Slack variables: {self.slack_variables}")
         slack_constraints = - ca.vertcat(*list(self.slack_variables.values()))
         constraints = ca.vertcat(barrier_constraints, slack_constraints)
 
@@ -174,7 +226,6 @@ class Controller():
                 inputs = {key: current_parameters[key] for key in self.nabla_inputs[i].keys()}
                 nabla_val = nabla_fun.call(inputs)["value"]
                 nabla_list.append(ca.norm_2(nabla_val))
-            # rospy.loginfo(f"gradient{self.agent_id}: {nabla_list}")
 
             # Solve the optimization problem and
             if any(ca.norm_2(val) < 1e-10 for val in nabla_list):
@@ -182,8 +233,6 @@ class Controller():
             else:
                 sol = self.solver(p=current_parameters, ubg=0)
                 optimal_input  = sol['x']
-            # rospy.loginfo(f"optimal_input {self.agent_id}: {optimal_input}")
-            # rospy.loginfo(f"constraints {self.agent_id}: {sol['g']}")
 
             # Publish the velocity command
             self.vel_cmd_msg.linear.x = np.minimum(optimal_input[0], self.max_velocity)
@@ -199,8 +248,8 @@ class Controller():
 
             r.sleep()
 
-    # ----------- Callbacks -----------------
 
+    # ----------- Callbacks -----------------
     def pose_callback(self, msg):
         self.agent_pose = msg
         self.agent_pose_pub.publish(self.agent_pose)
@@ -211,27 +260,11 @@ class Controller():
         self.agents[agent_id] = Agent(id=agent_id, initial_state=state)
         self.last_pose_time = rospy.Time.now() # If time for each agent is needed you need to change this
 
+    def numOfTasks_callback(self, msg):
+        self.total_tasks = msg.data
+
     def task_callback(self, msg):
-        # Store the task message
-        self.task = msg
-
-        # Create the predicate based on the type of the task
-        if self.task.type == "go_to_goal_predicate_2d":
-            predicate = go_to_goal_predicate_2d(goal=np.array(self.task.center), epsilon=self.task.epsilon, agent=self.agents[self.task.involved_agents[0]])
-        elif self.task.type == "formation_predicate":
-            predicate = formation_predicate(epsilon=self.task.epsilon, agent_i=self.agents[self.task.involved_agents[0]], agent_j=self.agents[self.task.involved_agents[1]], relative_pos=np.array(self.task.center))
-        elif self.task.type == "epsilon_position_closeness_predicate":
-            predicate = epsilon_position_closeness_predicate(epsilon=self.task.epsilon, agent_i=self.agents[self.task.involved_agents[0]], agent_j=self.agents[self.task.involved_agents[1]])
-
-        # Create the temporal operator
-        temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=self.task.interval[0], b=self.task.interval[1]))
-
-        # Create the task
-        task = StlTask(predicate=predicate, temporal_operator=temporal_operator)
-
-        # Add the task to the barriers and the edge
-        barrier = create_barrier_from_task(task=task, initial_conditions=[self.agents[i] for i in self.task.involved_agents], alpha_function=self.alpha_fun)
-        self.barriers.append(barrier)
+        self.task_msg_list.append(msg)
 
 
 def transform_twist(twist=Twist, transform_stamped=TransformStamped):

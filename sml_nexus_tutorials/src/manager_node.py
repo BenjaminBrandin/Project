@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import rospy
 from custom_msg.msg import task_msg
+from std_msgs.msg import Int32
 import yaml
 import numpy as np
 import casadi as ca
@@ -22,13 +23,15 @@ class Manager():
         self.sub_tasks: list[StlTask]= []
         self.agents = {}
         self.scale_factor = 3
+        self.total_tasks = 0
         
         # setup publishers
         self.task_pub = rospy.Publisher("tasks", task_msg, queue_size=10)
+        self.numOfTasks_pub = rospy.Publisher("numOfTasks", Int32, queue_size=10)
 
         # Load the initial states and the task from the yaml files
         with open("/home/benjamin/catkin_ws/src/sml_nexus_tutorials/sml_nexus_tutorials/yaml_files/start_pos.yaml") as file:
-            self.start_pos = yaml.safe_load(file)   # Replace this with $(arg coord) in launch file and get_param(-coord) in the code
+            self.start_pos = yaml.safe_load(file)  
 
         with open("/home/benjamin/catkin_ws/src/sml_nexus_tutorials/sml_nexus_tutorials/yaml_files/tasks.yaml") as file:
             self.tasks = yaml.safe_load(file)
@@ -46,17 +49,17 @@ class Manager():
         communication_info = {task_name: {"EDGE": task_info["EDGE"], "COMMUNICATE": task_info["COMMUNICATE"]} for task_name, task_info in self.tasks.items()}
 
         # Creating the graphs
-        self.comm_graph = create_communication_graph_from_states(self.agents.keys(), communication_info)
+        self.comm_graph = create_communication_graph_from_states(self.agents.keys(), communication_info) # change so that communication is distance based
         self.task_graph = create_task_graph_from_edges(edge_list = task_edges) # creates an empty task graph
         self.initial_task_graph = self.task_graph.copy()
 
         self.update_graph()
-        computeNewTaskGraph(self.task_graph, self.comm_graph, task_edges, communication_info, start_position=start_positions)
+        computeNewTaskGraph(self.task_graph, self.comm_graph, communication_info, start_position=start_positions)
         
         self.print_tasks()
         self.plot_graph() # If you comment out this line, you need rospy.sleep(6) before self.publish_tasks() to ensure the control nodes have loaded
+        self.publish_numOfTask()
         self.publish_tasks()
-
 
 
     def update_graph(self):
@@ -102,6 +105,7 @@ class Manager():
         for i,j,attr in self.task_graph.edges(data=True):
             tasks = attr["container"].task_list
             for task in tasks:
+                self.total_tasks += 1
                 print("-----------------------------------")
                 print(f"EDGE: {list(task.edgeTuple)}")
                 print(f"TYPE: {task.type}")
@@ -130,8 +134,13 @@ class Manager():
 
                 # Then publish the message
                 self.task_pub.publish(task_message)
-                # Sleep for a while to ensure the message is published and processed
-                rospy.sleep(1)
+                rospy.sleep(0.5)
+
+    def publish_numOfTask(self):
+        flag = Int32()
+        flag.data = self.total_tasks
+        self.numOfTasks_pub.publish(flag)
+        
 
 
 if __name__ == "__main__":

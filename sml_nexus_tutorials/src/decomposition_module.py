@@ -404,7 +404,7 @@ def minkowskiSumLinearRepresentation(listOfFormulas : List[StlTask], edgeList:Li
     return A,b
 
 
-def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, task_edges:List[Tuple], comm_info:Dict[str, Dict], start_position: Dict[int, np.ndarray], problemDimension = 2, maxInterRobotDistance = 3)-> List[StlTask]: 
+def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict[str, Dict], start_position: Dict[int, np.ndarray], problemDimension = 2, maxInterRobotDistance = 3)-> List[StlTask]: 
     """ Solves the task decomposition completely"""
     
     numberOfVerticesHypercube = 2**problemDimension
@@ -550,28 +550,28 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, task_edges:Lis
         # PRINT SOLUTION
         #########################################################################################################
 
-        # newFormulasCount = 0
-        # for i,j,attr in optimisedEdges:
-        #     newFormulasCount += len([formula for formula in attr.task_list if formula.isParametric])
+        newFormulasCount = 0
+        for i,j,attr in optimisedEdges:
+            newFormulasCount += len([formula for formula in attr.task_list if formula.isParametric])
         
         
-        # print("-----------------------------------------")   
-        # print("Internal Report")   
-        # print("-----------------------------------------")   
-        # print(f"Total number of formulas created : {newFormulasCount}")   
-        # print("---------Found Solution------------------") 
-        # for path,formulas in decompositionSolved :   
-        #     print("path: ",path)
-        #     for formula in formulas:
-        #         print("--------------------------") 
-        #         print(f"EDGE: {formula.edgeTuple}")
-        #         print(f"TYPE: {formula.type}")
-        #         print(f"CENTER: {formula.center}")
-        #         print(f"EPSILON: {formula.epsilon}")
-        #         print(f"TEMP_OP: {formula.temporal_type}")
-        #         print(f"INTERVAL: {formula.time_interval.aslist}")
-        #         print(f"INVOLVED_AGENTS: {formula.contributing_agents}")
-        #         print("--------------------------")
+        print("-----------------------------------------")   
+        print("Internal Report")   
+        print("-----------------------------------------")   
+        print(f"Total number of formulas created : {newFormulasCount}")   
+        print("---------Found Solution------------------") 
+        for path,formulas in decompositionSolved :   
+            print("path: ",path)
+            for formula in formulas:
+                print("====================================") 
+                print(f"EDGE: {formula.edgeTuple}")
+                print(f"TYPE: {formula.type}")
+                print(f"CENTER: {formula.center}")
+                print(f"EPSILON: {formula.epsilon}")
+                print(f"TEMP_OP: {formula.temporal_type}")
+                print(f"INTERVAL: {formula.time_interval.aslist}")
+                print(f"INVOLVED_AGENTS: {formula.contributing_agents}")
+                print("===================================")
 
 
 

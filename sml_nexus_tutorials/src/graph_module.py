@@ -103,10 +103,6 @@ class EdgeTaskContainer:
     
         
 def create_communication_graph_from_states(states: List[int], communication_info: Dict[str, Dict]) -> nx.Graph :
-    """ 
-    Creates a communication graph based on the states given in a dictionary. Note that the states are assumed to be given such that the first two elements are the x,y position of the agent.
-    """
-    
     comm_graph = nx.Graph()
     comm_graph.add_nodes_from(states)
 
@@ -126,38 +122,9 @@ def create_communication_graph_from_states(states: List[int], communication_info
 
 
 def create_task_graph_from_edges(edge_list: Union[List[EdgeTaskContainer], List[Tuple[UniqueIdentifier, UniqueIdentifier]]]) -> nx.Graph:
-    """
-    Create a task graph from a list of edges.
 
-    Args :
-    - edge_list: A list of edges represented either as EdgeTaskContainer objects or tuples of integers.
-
-    Returns:
-    - task_graph: A networkx Graph object representing the task graph.
-
-    """
     task_graph = nx.Graph()
     for edge in edge_list:
         task_graph.add_edge(edge[0], edge[1], container=EdgeTaskContainer(edge_tuple=edge))
     return task_graph
 
-
-# def create_task_graph_from_edges(edge_list: Union[List[EdgeTaskContainer], List[Tuple[UniqueIdentifier, UniqueIdentifier]]]) -> nx.Graph:
-#     """
-#     Create a task graph from a list of edges.
-
-#     Args :
-#     - edge_list: A list of edges represented either as EdgeTaskContainer objects or tuples of integers.
-
-#     Returns:
-#     - task_graph: A networkx Graph object representing the task graph.
-
-#     """
-#     task_graph = nx.Graph()
-#     for edge in edge_list:
-#         if isinstance(edge, EdgeTaskContainer):
-#             task_graph.add_edge(edge.edge_tuple[0], edge.edge_tuple[1])
-#             task_graph[edge.edge_tuple[0]][edge.edge_tuple[1]]["container"] = edge
-#         else:
-#             task_graph.add_edge(edge[0], edge[1], container=EdgeTaskContainer(edge_tuple=edge))
-#     return task_graph

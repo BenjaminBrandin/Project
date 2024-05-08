@@ -117,7 +117,7 @@ class PredicateFunction :
                  computeApproximation = False,
                  sourceNode: int = None,
                  targetNode: int = None,
-                 center: List[int] = None,
+                 center: List[float] = None,
                  epsilon: float = None) -> None:
         
         self._function_name = function_name
@@ -816,7 +816,7 @@ class StlTask :
 def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, agent:Agent) ->PredicateFunction:
 
     array_to_list = goal.tolist()  # Convert NumPy array to Python list
-    goal_list = [int(x) for x in array_to_list]  # Convert elements to integers
+    goal_list = [float(x) for x in array_to_list]  # Convert elements to integers
     
     if agent.symbolic_state.numel() != goal.size:
         raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent.symbolic_state.s) + " and " + str(goal.size) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
@@ -888,7 +888,7 @@ def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_po
         PredicateFunction : the predicate function 
     """
     array_to_list = relative_pos.tolist()  # Convert NumPy array to Python list
-    relative_pos_list = [int(x) for x in array_to_list]  # Convert elements to integers
+    relative_pos_list = [float(x) for x in array_to_list]  # Convert elements to integers
 
     if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
         raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
@@ -914,7 +914,7 @@ def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_po
 
     return PredicateFunction(function_name="formation_predicate", function=predicate, function_edge=predicate_edge,center=relative_pos_list, epsilon=epsilon)
 
-def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha_function:ca.Function=None)-> BarrierFunction :
+def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha_function:ca.Function=None)-> BarrierFunction : 
     """
     Function to compute the conjunction of barrier functions. The function takes a variable number of barrier functions as input and returns a new barrier function that is the conjunction of the input barrier functions.
     
