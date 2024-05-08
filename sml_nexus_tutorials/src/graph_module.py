@@ -25,7 +25,7 @@ SOFTWARE.
 import networkx as nx 
 import numpy   as np
 import casadi  as ca
-from builders import StlTask,TimeInterval, AlwaysOperator, epsilon_position_closeness_predicate 
+from builders import StlTask,TimeInterval, AlwaysOperator, Agent, epsilon_position_closeness_predicate 
 
 from typing import Tuple, List, Dict, Union
 UniqueIdentifier = int
@@ -101,7 +101,13 @@ class EdgeTaskContainer:
     def flagOptimizationInvolvement(self) -> None :
         self._involved_in_optimization = 1
     
-        
+def create_task_graph_from_edges(edge_list: Union[List[EdgeTaskContainer], List[Tuple[UniqueIdentifier, UniqueIdentifier]]]) -> nx.Graph:
+
+    task_graph = nx.Graph()
+    for edge in edge_list:
+        task_graph.add_edge(edge[0], edge[1], container=EdgeTaskContainer(edge_tuple=edge))
+    return task_graph
+
 def create_communication_graph_from_states(states: List[int], communication_info: Dict[str, Dict]) -> nx.Graph :
     comm_graph = nx.Graph()
     comm_graph.add_nodes_from(states)
@@ -120,11 +126,26 @@ def create_communication_graph_from_states(states: List[int], communication_info
 
     return comm_graph
 
+# def create_communication_graph_from_states(states: Dict[int, np.ndarray], communication_radius: float) -> nx.Graph :    
 
-def create_task_graph_from_edges(edge_list: Union[List[EdgeTaskContainer], List[Tuple[UniqueIdentifier, UniqueIdentifier]]]) -> nx.Graph:
+#     comm_graph = nx.Graph()
+#     comm_graph.add_nodes_from(states.keys())
+#     others = states.copy()
 
-    task_graph = nx.Graph()
-    for edge in edge_list:
-        task_graph.add_edge(edge[0], edge[1], container=EdgeTaskContainer(edge_tuple=edge))
-    return task_graph
+#     # Add self-loops
+#     for state in states.keys():
+#         comm_graph.add_edge(state, state)
+
+#     for id_i,state_i in states.items() :
+#         others.pop(id_i)
+        
+#         for id_j,state_j in others.items():
+#             distance = np.linalg.norm(state_i[:2]-state_j[:2])
+#             if distance < communication_radius:
+#                 comm_graph.add_edge(id_i,id_j)   
+    
+#     return comm_graph
+
+
+
 

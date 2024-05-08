@@ -24,6 +24,7 @@ class Manager():
         self.agents = {}
         self.scale_factor = 3
         self.total_tasks = 0
+        communication_radius = 3
         
         # setup publishers
         self.task_pub = rospy.Publisher("tasks", task_msg, queue_size=10)
@@ -37,7 +38,7 @@ class Manager():
             self.tasks = yaml.safe_load(file)
 
         # Initial states of the robots and creating the robots
-        start_positions = {}
+        start_positions: dict[int, np.ndarray] = {}
         for i, (state_key, state_value) in enumerate(self.start_pos.items(), start=1):
             state = np.array(state_value)
             agent = Agent(id=i, initial_state=state)
@@ -49,7 +50,8 @@ class Manager():
         communication_info = {task_name: {"EDGE": task_info["EDGE"], "COMMUNICATE": task_info["COMMUNICATE"]} for task_name, task_info in self.tasks.items()}
 
         # Creating the graphs
-        self.comm_graph = create_communication_graph_from_states(self.agents.keys(), communication_info) # change so that communication is distance based
+        # self.comm_graph = create_communication_graph_from_states(start_positions, communication_radius) # change so that communication is distance based
+        self.comm_graph = create_communication_graph_from_states(self.agents.keys(), communication_info) 
         self.task_graph = create_task_graph_from_edges(edge_list = task_edges) # creates an empty task graph
         self.initial_task_graph = self.task_graph.copy()
 

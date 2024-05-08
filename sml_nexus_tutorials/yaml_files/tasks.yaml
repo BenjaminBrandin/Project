@@ -29,8 +29,8 @@ TASK_4:
   EDGE: [2, 3]
   TYPE: "epsilon_position_closeness_predicate"
   CENTER: [0, 0]
-  EPSILON: 2
+  EPSILON: 3
   TEMP_OP: "AlwaysOperator"
   INTERVAL: [30, 40]
   INVOLVED_AGENTS: [2, 3]
-  COMMUNICATE: True
+  COMMUNICATE: False
