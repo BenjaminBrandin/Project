@@ -6,7 +6,7 @@ import yaml
 import numpy as np
 import casadi as ca
 import networkx as nx
-from builders import Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, go_to_goal_predicate_2d, formation_predicate, create_barrier_from_task, epsilon_position_closeness_predicate
+from builders import Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, go_to_goal_predicate_2d, formation_predicate, create_barrier_from_task, epsilon_position_closeness_predicate, collision_avoidance_predicate
 import matplotlib.pyplot as plt
 from graph_module import EdgeTaskContainer, create_communication_graph_from_states, create_task_graph_from_edges
 from custom_msg.msg import task_msg
@@ -80,7 +80,9 @@ class Manager():
             predicate = formation_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]], relative_pos=np.array(task_info["CENTER"]))
         elif task_info["TYPE"] == "epsilon_position_closeness_predicate":
             predicate = epsilon_position_closeness_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]])
-
+        elif task_info["TYPE"] == "collision_avoidance_predicate":
+            predicate = collision_avoidance_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]])
+            
         # Create the temporal operator
         if task_info["TEMP_OP"] == "AlwaysOperator":
             temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=task_info["INTERVAL"][0], b=task_info["INTERVAL"][1]))

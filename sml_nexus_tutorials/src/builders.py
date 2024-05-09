@@ -867,10 +867,29 @@ def epsilon_position_closeness_predicate(epsilon:float, agent_i:Agent, agent_j:A
                                                                     ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
                                                                     ["value"]) # this defined an hyperplane function
 
-    predicate_edge          = ca.Function("position_epsilon_closeness_edge",[edge],
-                                                                    [predicate_expression_edge]) # this defined an hyperplane function
+    predicate_edge          = ca.Function("position_epsilon_closeness_edge",[edge],[predicate_expression_edge]) # this defined an hyperplane function
 
     return PredicateFunction(function_name="epsilon_position_closeness_predicate", function=predicate, function_edge=predicate_edge, epsilon=epsilon)
+
+def collision_avoidance_predicate(epsilon:float, agent_i:Agent, agent_j:Agent) ->PredicateFunction: # Does not need to be called state_1 and state_2
+
+
+    if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
+        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
+    
+    edge = ca.MX.sym(f"edge_{agent_i.id}{agent_j.id}", 2, 1)
+
+    predicate_expression =  (ca.sumsqr(agent_i.symbolic_state - agent_j.symbolic_state) - epsilon**2) # the scaling will make the time derivative smaller whe you built the barrier function
+    predicate_expression_edge = (ca.sumsqr(edge) - epsilon**2)
+
+    predicate            = ca.Function("position_epsilon_closeness",[agent_i.symbolic_state, agent_j.symbolic_state],
+                                                                    [predicate_expression],
+                                                                    ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
+                                                                    ["value"]) # this defined an hyperplane function
+
+    predicate_edge          = ca.Function("position_epsilon_closeness_edge",[edge],[predicate_expression_edge]) # this defined an hyperplane function
+
+    return PredicateFunction(function_name="collision_avoidance_predicate", function=predicate, function_edge=predicate_edge, epsilon=epsilon)
 
 
 def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_pos:np.ndarray, direction_i_to_j:bool=True) ->PredicateFunction:

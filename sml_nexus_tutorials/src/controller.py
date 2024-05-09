@@ -5,7 +5,7 @@ import rospy
 import copy
 import tf2_ros
 import tf2_geometry_msgs
-from builders import BarrierFunction, Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, create_barrier_from_task, go_to_goal_predicate_2d, formation_predicate, epsilon_position_closeness_predicate, conjunction_of_barriers
+from builders import BarrierFunction, Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, create_barrier_from_task, go_to_goal_predicate_2d, formation_predicate, epsilon_position_closeness_predicate, conjunction_of_barriers, collision_avoidance_predicate
 from typing import List, Dict
 import casadi as ca
 import casadi.tools as ca_tools
@@ -113,7 +113,9 @@ class Controller():
                 predicate = formation_predicate(epsilon=message.epsilon, agent_i=self.agents[message.involved_agents[0]], agent_j=self.agents[message.involved_agents[1]], relative_pos=np.array(message.center))
             elif message.type == "epsilon_position_closeness_predicate":
                 predicate = epsilon_position_closeness_predicate(epsilon=message.epsilon, agent_i=self.agents[message.involved_agents[0]], agent_j=self.agents[message.involved_agents[1]])
-
+            elif message.type == "collision_avoidance_predicate":
+                predicate = collision_avoidance_predicate(epsilon=message.epsilon, agent_i=self.agents[message.involved_agents[0]], agent_j=self.agents[message.involved_agents[1]])
+            
             # Create the temporal operator
             if message.temp_op == "AlwaysOperator":
                 temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=message.interval[0], b=message.interval[1]))
@@ -153,7 +155,7 @@ class Controller():
         cost = self.input_vector.T @ self.input_vector
         for id,slack in self.slack_variables.items():
             if id == self.agent_id:
-                cost += 100* slack**2
+                cost += 1000* slack**2
             else:
                 cost += 10* slack**2
 
@@ -233,7 +235,7 @@ class Controller():
             else:
                 sol = self.solver(p=current_parameters, ubg=0)
                 optimal_input  = sol['x']
-
+            # rospy.loginfo(f"Optimal Input {self.agent_id}: {optimal_input}")
             # Publish the velocity command
             self.vel_cmd_msg.linear.x = np.minimum(optimal_input[0], self.max_velocity)
             self.vel_cmd_msg.linear.y = np.minimum(optimal_input[1], self.max_velocity)

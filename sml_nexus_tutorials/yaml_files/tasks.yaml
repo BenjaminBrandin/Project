@@ -4,33 +4,33 @@ TASK_1:
   CENTER: [9, 7]
   EPSILON: 2
   TEMP_OP: "AlwaysOperator"
-  INTERVAL: [30, 50]
+  INTERVAL: [30, 40]
   INVOLVED_AGENTS: [1]
   COMMUNICATE: True
 TASK_2:
   EDGE: [1, 2]
-  TYPE: "formation_predicate"
+  TYPE: "epsilon_position_closeness_predicate"
   CENTER: [-1.5, -1]
   EPSILON: 1
   TEMP_OP: "AlwaysOperator"
-  INTERVAL: [30, 40]
+  INTERVAL: [30, 50]
   INVOLVED_AGENTS: [1, 2]
   COMMUNICATE: True
 TASK_3:
   EDGE: [1, 3]
-  TYPE: "formation_predicate"
+  TYPE: "epsilon_position_closeness_predicate"
   CENTER: [-1.5, 1]
   EPSILON: 1
   TEMP_OP: "AlwaysOperator"
-  INTERVAL: [30, 40]
+  INTERVAL: [30, 50]
   INVOLVED_AGENTS: [1, 3]
   COMMUNICATE: True
 TASK_4:
   EDGE: [2, 3]
-  TYPE: "epsilon_position_closeness_predicate"
+  TYPE: "collision_avoidance_predicate"
   CENTER: [0, 0]
-  EPSILON: 3
+  EPSILON: 1
   TEMP_OP: "AlwaysOperator"
-  INTERVAL: [30, 40]
+  INTERVAL: [30, 50]
   INVOLVED_AGENTS: [2, 3]
-  COMMUNICATE: False
+  COMMUNICATE: True
