@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-
 import sys
-import rospy
 import copy
+import rospy
 import tf2_ros
-import tf2_geometry_msgs
-from builders import BarrierFunction, Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, create_barrier_from_task, go_to_goal_predicate_2d, formation_predicate, epsilon_position_closeness_predicate, conjunction_of_barriers, collision_avoidance_predicate
-from typing import List, Dict
-import casadi as ca
-import casadi.tools as ca_tools
 import numpy as np
-from geometry_msgs.msg import Twist, PoseStamped, TransformStamped, Vector3Stamped
-from custom_msg.msg import task_msg
+import casadi as ca
+import tf2_geometry_msgs
+from typing import List, Dict
 from std_msgs.msg import Int32
+import casadi.tools as ca_tools
+from collections import defaultdict
+from custom_msg.msg import task_msg
+from geometry_msgs.msg import Twist, PoseStamped, TransformStamped, Vector3Stamped
+from builders import (BarrierFunction, Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, 
+                      create_barrier_from_task, go_to_goal_predicate_2d, formation_predicate, 
+                      epsilon_position_closeness_predicate, conjunction_of_barriers, collision_avoidance_predicate)
 
 
 class Controller():
@@ -45,7 +47,7 @@ class Controller():
         self.barriers = []
         self.task = task_msg()
         self.task_msg_list = []
-        self.total_tasks = 100
+        self.total_tasks = float('inf')
 
         # Velocity Command Message
         self.max_velocity = 5
@@ -70,8 +72,9 @@ class Controller():
             rospy.sleep(1)
 
 
-        # Wait until all the task messages have been received |Find a better way to do this|
+        # Wait until all the task messages have been received
         while len(self.task_msg_list) < self.total_tasks:
+            # rospy.loginfo(f"Waiting for all tasks to be received. Received {len(self.task_msg_list)} out of {self.total_tasks}")
             rospy.sleep(1)
 
         # Create the tasks and the barriers
@@ -81,40 +84,40 @@ class Controller():
 
 
     def conjunction_on_same_edge(self, barriers:List[BarrierFunction]) -> List[BarrierFunction]:
-        new_barriers = []
-        barriers_dict: Dict[tuple, List[BarrierFunction]] = {}
+        barriers_dict: defaultdict = defaultdict(list)
 
         # create the conjunction of the barriers on the same edge
         for barrier in barriers:
             edge = tuple(sorted(barrier.contributing_agents))
-            if edge in barriers_dict:
-                barriers_dict[edge].append(barrier)
-            else:
-                barriers_dict[edge] = [barrier]
+            barriers_dict[edge].append(barrier)
 
-        for barrier_list in barriers_dict.values():
-            if len(barrier_list) > 1:
-                new_barriers += [conjunction_of_barriers(barrier_list=barrier_list, associated_alpha_function=self.alpha_fun)]
-            else:
-                new_barriers += barrier_list
+        # Use list comprehension to create new_barriers
+        new_barriers = [conjunction_of_barriers(barrier_list=barrier_list, associated_alpha_function=self.alpha_fun) 
+                        if len(barrier_list) > 1 else barrier_list[0] 
+                        for barrier_list in barriers_dict.values()]
 
         return new_barriers
 
 
-    def create_task(self, messages:List[task_msg]):
+    def create_task(self, messages:List[task_msg]) -> List[BarrierFunction]:
         barriers_list = []
 
         for message in messages:
-
             # Create the predicate based on the type of the task
             if message.type == "go_to_goal_predicate_2d":
-                predicate = go_to_goal_predicate_2d(goal=np.array(message.center), epsilon=message.epsilon, agent=self.agents[message.involved_agents[0]])
+                predicate = go_to_goal_predicate_2d(goal=np.array(message.center), epsilon=message.epsilon, 
+                                                    agent=self.agents[message.involved_agents[0]])
             elif message.type == "formation_predicate":
-                predicate = formation_predicate(epsilon=message.epsilon, agent_i=self.agents[message.involved_agents[0]], agent_j=self.agents[message.involved_agents[1]], relative_pos=np.array(message.center))
+                predicate = formation_predicate(epsilon=message.epsilon, agent_i=self.agents[message.involved_agents[0]], 
+                                                agent_j=self.agents[message.involved_agents[1]], relative_pos=np.array(message.center))
             elif message.type == "epsilon_position_closeness_predicate":
-                predicate = epsilon_position_closeness_predicate(epsilon=message.epsilon, agent_i=self.agents[message.involved_agents[0]], agent_j=self.agents[message.involved_agents[1]])
+                predicate = epsilon_position_closeness_predicate(epsilon=message.epsilon, agent_i=self.agents[message.involved_agents[0]], 
+                                                                 agent_j=self.agents[message.involved_agents[1]])
             elif message.type == "collision_avoidance_predicate":
-                predicate = collision_avoidance_predicate(epsilon=message.epsilon, agent_i=self.agents[message.involved_agents[0]], agent_j=self.agents[message.involved_agents[1]])
+                predicate = collision_avoidance_predicate(epsilon=message.epsilon, agent_i=self.agents[message.involved_agents[0]], 
+                                                          agent_j=self.agents[message.involved_agents[1]])
+            else:
+                raise Exception(f"Task type {message.type} is not supported")
             
             # Create the temporal operator
             if message.temp_op == "AlwaysOperator":
@@ -129,27 +132,28 @@ class Controller():
             initial_conditions = [self.agents[i] for i in message.involved_agents]
             barriers_list += [create_barrier_from_task(task=task, initial_conditions=initial_conditions, alpha_function=self.alpha_fun)]
         
+        # Create the conjunction of the barriers on the same edge
         barriers_list = self.conjunction_on_same_edge(barriers_list)
 
         return barriers_list
-    
+
 
     def get_qpsolver_and_parameter_structure(self):
         # Create the parameter structure for the optimization problem --- 'p' ---
-        parameter_list = []
+        parameter_list  = []
         parameter_list += [ca_tools.entry(f"state_{id}", shape=2) for id in self.agents.keys()]
         parameter_list += [ca_tools.entry("time", shape=1)]
         self.parameters = ca_tools.struct_symMX(parameter_list)
 
         # Create the constraints for the optimization problem --- 'g' ---
         self.relevant_barriers = [barrier for barrier in self.barriers if self.agent_id in barrier.contributing_agents]
-        barrier_constraints = self.generate_barrier_constraints(self.relevant_barriers)
-        slack_constraints = - ca.vertcat(*list(self.slack_variables.values()))
-        constraints = ca.vertcat(barrier_constraints, slack_constraints)
+        barrier_constraints    = self.generate_barrier_constraints(self.relevant_barriers)
+        slack_constraints      = - ca.vertcat(*list(self.slack_variables.values()))
+        constraints            = ca.vertcat(barrier_constraints, slack_constraints)
 
         # Create the decision variables for the optimization problem --- 'x' ---
         slack_vector = ca.vertcat(*list(self.slack_variables.values()))
-        opt_vector = ca.vertcat(self.input_vector, slack_vector)
+        opt_vector   = ca.vertcat(self.input_vector, slack_vector)
 
         # Create the object function for the optimization problem --- 'f' ---
         cost = self.input_vector.T @ self.input_vector
@@ -169,7 +173,7 @@ class Controller():
     def generate_barrier_constraints(self, barrier_list:List[BarrierFunction]) -> ca.MX:
         constraints = []
         for barrier in barrier_list:
-            # Check if the barrier has more than one contributing agent
+            # Check the barrier for leading agent
             if len(barrier.contributing_agents) > 1:
                 if barrier.contributing_agents[0] == self.agent_id:
                     neighbour_id = barrier.contributing_agents[1]
@@ -183,14 +187,14 @@ class Controller():
             named_inputs["time"] = self.parameters["time"]
 
             # Get the necessary functions from the barrier
-            nabla_xi_fun = barrier.gradient_function_wrt_state_of_agent(self.agent_id)
+            nabla_xi_fun                = barrier.gradient_function_wrt_state_of_agent(self.agent_id)
+            barrier_fun                 = barrier.function
             partial_time_derivative_fun = barrier.partial_time_derivative
-            barrier_fun = barrier.function
 
             # Calculate the symbolic expressions for the barrier constraint
             nabla_xi = nabla_xi_fun.call(named_inputs)["value"]
-            dbdt = partial_time_derivative_fun.call(named_inputs)["value"]
-            alpha_b = barrier.associated_alpha_function(barrier_fun.call(named_inputs)["value"])
+            dbdt     = partial_time_derivative_fun.call(named_inputs)["value"]
+            alpha_b  = barrier.associated_alpha_function(barrier_fun.call(named_inputs)["value"])
 
             # Create load sharing for different constraints
             if neighbour_id == self.agent_id:
@@ -225,17 +229,17 @@ class Controller():
             nabla_list = []
             inputs = {}
             for i, nabla_fun in enumerate(self.nabla_funs):
-                inputs = {key: current_parameters[key] for key in self.nabla_inputs[i].keys()}
+                inputs    = {key: current_parameters[key] for key in self.nabla_inputs[i].keys()}
                 nabla_val = nabla_fun.call(inputs)["value"]
                 nabla_list.append(ca.norm_2(nabla_val))
 
-            # Solve the optimization problem and
+            # Solve the optimization problem 
             if any(ca.norm_2(val) < 1e-10 for val in nabla_list):
                 optimal_input = ca.MX([0, 0])
             else:
                 sol = self.solver(p=current_parameters, ubg=0)
                 optimal_input  = sol['x']
-            # rospy.loginfo(f"Optimal Input {self.agent_id}: {optimal_input}")
+
             # Publish the velocity command
             self.vel_cmd_msg.linear.x = np.minimum(optimal_input[0], self.max_velocity)
             self.vel_cmd_msg.linear.y = np.minimum(optimal_input[1], self.max_velocity)
@@ -257,10 +261,10 @@ class Controller():
         self.agent_pose_pub.publish(self.agent_pose)
 
     def other_agent_pose_callback(self, msg):
-        agent_id = int(msg._connection_header['topic'].split('/')[-2].replace('nexus', ''))
-        state = np.array([msg.pose.position.x, msg.pose.position.y])
+        agent_id              = int(msg._connection_header['topic'].split('/')[-2].replace('nexus', ''))
+        state                 = np.array([msg.pose.position.x, msg.pose.position.y])
         self.agents[agent_id] = Agent(id=agent_id, initial_state=state)
-        self.last_pose_time = rospy.Time.now() # If time for each agent is needed you need to change this
+        self.last_pose_time   = rospy.Time.now() 
 
     def numOfTasks_callback(self, msg):
         self.total_tasks = msg.data

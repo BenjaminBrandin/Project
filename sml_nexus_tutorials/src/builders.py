@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
+import itertools
 import numpy as np
 import casadi as ca
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from abc import ABC, abstractmethod
 from typing import Tuple, Dict, List, TypeVar, Optional, Union
-import itertools
 
 UniqueIdentifier = int 
 globalOptimizer = ca.Opti()
@@ -95,25 +95,25 @@ def get_id_from_input_name(input_name: str) -> UniqueIdentifier:
 
 
 class Agent:
+    """
+    This class is used to store the information about an agent. 
+    """
     def __init__(self, id: int, initial_state: np.ndarray):
         self.id = id
         self.symbolic_state = ca.MX.sym(f'state_{id}', 2)
         self.state = initial_state
 
-    def update_state(self, new_state):
-        self.state = new_state
-
-
 
 class PredicateFunction :
     """
-    PredicateFunction definition class. This class is used to store the information about a predicate function. The class is used to store the predicate function and the contributing agents to the satisfaction of the predicate function.
+    PredicateFunction definition class. This class is used to store the information about a predicate function. 
+    The class is used to store the predicate function and the contributing agents to the satisfaction of the predicate function.
     """
     def __init__(self,
                  function_name: str,
                  function: ca.Function,
                  function_edge: ca.Function,
-                 stateSpaceDimension: int = 2, # change later so it is not static
+                 stateSpaceDimension: int = 2, 
                  computeApproximation = False,
                  sourceNode: int = None,
                  targetNode: int = None,
@@ -121,20 +121,17 @@ class PredicateFunction :
                  epsilon: float = None) -> None:
         
         self._function_name = function_name
-        self._function = function
+        self._function      = function
         self._function_edge = function_edge
-        self._dim = stateSpaceDimension
+        self._dim           = stateSpaceDimension
+        self._epsilon       = epsilon if epsilon is not None else 1
+        self._center        = center if center is not None else [0.0, 0.0]
 
-        # This is stand-in values for the task_msg
-        self._epsilon = epsilon if epsilon is not None else 1
-        self._center = center if center is not None else [0, 0]
-
-        
         if self._function != None:
             self._isParametric = 0
-            self._centerVar = None
-            self._nuVar = None
-            self._etaVar = None
+            self._centerVar    = None
+            self._nuVar        = None
+            self._etaVar       = None
 
             self._contributing_agents = [get_id_from_input_name(name) for name in self._function.name_in()]
             if len(self._contributing_agents) > 1:
@@ -145,16 +142,15 @@ class PredicateFunction :
 
         else:
             # Create hypercube parameters since the formula is parametric
-            self._centerVar = globalOptimizer.variable(self._dim, 1)  # casadi.Opti.variable() edge Casadi Variable for optimization
-            self._nuVar = globalOptimizer.variable(self._dim, 1)  # casadi.Opti.variable() nu variable (cuboid dimensions) for optimization
-            self._etaVar = ca.vertcat(self._centerVar, self._nuVar)  # casadi.Opti.variable() [centerVar, nuVar] (just concatenation)
-            self._isParametric = 1
-            self._sourceNode = sourceNode
-            self._targetNode = targetNode
-            self._edgeTuple = (sourceNode, targetNode)
+            self._centerVar           = globalOptimizer.variable(self._dim, 1)    # casadi.Opti.variable() edge Casadi Variable for optimization
+            self._nuVar               = globalOptimizer.variable(self._dim, 1)    # casadi.Opti.variable() nu variable (cuboid dimensions) for optimization
+            self._etaVar              = ca.vertcat(self._centerVar, self._nuVar)  # casadi.Opti.variable() [centerVar, nuVar] (just concatenation)
+            self._isParametric        = 1
+            self._sourceNode          = sourceNode
+            self._targetNode          = targetNode
+            self._edgeTuple           = (sourceNode, targetNode)
             self._contributing_agents = [sourceNode, targetNode]
                 
-            
         self._isApproximated               = False
         self._optimalApproximationvertices = None
         self._optimalApproximationCenter   = None # center of the zero level set
@@ -221,9 +217,8 @@ class PredicateFunction :
         opti = ca.Opti()
         
         centerVarDummy = opti.variable(self._dim,1)
-        nuVarDummy  = opti.variable(self._dim,1)
+        nuVarDummy     = opti.variable(self._dim,1)
         
-     
         cartesianProductSets         = [[-1,1],]*self._dim
         hypercubeVertices            = np.array(list(itertools.product(*cartesianProductSets))).T # All vertices of hypercube centered at the origin (Each vertex is a column)
         parametericHypercubeVertices = centerVarDummy + hypercubeVertices*nuVarDummy/2                # Each column of the matrix represents one of the vertices
@@ -244,7 +239,6 @@ class PredicateFunction :
         cost = self._function(1/volume) # it must be convex
         
         # give good initial guess to avaoid initial high values
-        
         opti.set_initial(centerVarDummy,self._centerGuess)
         opti.set_initial(nuVarDummy,np.ones(self._dim)*1.5) # just to not start with 0
         
@@ -292,7 +286,7 @@ class PredicateFunction :
             # if the direction of request matches the direction of the parametric predicate the use the normal center
             elif self.edgeTuple == (source,target) :
                # the requested direction is the orginal direction of the predicate
-               parametericHypercubeVertices =    self._centerVar + hypercubeVertices*self._nuVar/2    # Each column of the matrix represents one of the vertices
+               parametericHypercubeVertices = self._centerVar + hypercubeVertices*self._nuVar/2    # Each column of the matrix represents one of the vertices
             
             else : # use the opposite direction center
                 parametericHypercubeVertices = -1*self._centerVar + hypercubeVertices*self._nuVar/2   # Each column of the matrix represents one of the vertices
@@ -302,6 +296,7 @@ class PredicateFunction :
         
         return parametericHypercubeVertices
     
+
     def linearRepresentationHypercube(self,source:int,target:int) :
         """returns linear representation of the parameteric function as Ax<=b"""
         if self.hasUndefinedDirection :
@@ -350,10 +345,6 @@ class PredicateFunction :
     
     
 
-
-
-
-
 class BarrierFunction:
     """class for convex barrier functions"""
     def __init__(self,
@@ -385,18 +376,16 @@ class BarrierFunction:
         
         check_barrier_function_IO_names(function) # will thraw an exception if the wrong naming in input and output is given
 
-        self._function :ca.Function= function
-        self._switch_function = switch_function
+        self._function :ca.Function = function
+        self._switch_function       = switch_function
         self.check_that_is_scalar_function(function=associated_alpha_function) # throws an error if the given function is not valid one
         self._associated_alpha_function = associated_alpha_function
         self.check_that_is_scalar_function(function=time_function) # throws an error if the given function is not valid one
         self._time_function = time_function
         
-        
         names = [name for name in function.name_in() if name != "time"] # remove the time
         self._contributing_agents = [get_id_from_input_name(name) for name in names] 
         self._gradient_function_wrt :dict[UniqueIdentifier,ca.Function] = {}
-        
         
         self._partial_time_derivative :ca.Function = ca.Function()
         self._compute_local_gradient_functions() # computes local time derivatives and gradient functions wrt the state of each agent involved in the barrier function
@@ -404,33 +393,28 @@ class BarrierFunction:
         if name == None :
             self._name = self._function.name()
     
-    
     @property
     def function(self) :
         return self._function
     @property
     def name(self):
         return self._name
-    
     @property
     def associated_alpha_function(self):
         return self._associated_alpha_function
-    
-
     @property
     def partial_time_derivative(self):
         return self._partial_time_derivative 
-
     @property
     def contributing_agents(self):
         return self._contributing_agents
-    
     @property
     def switch_function(self):
         return self._switch_function
     @property
     def time_function(self):
         return self._time_function
+    
 
     def gradient_function_wrt_state_of_agent(self,agent_id) -> ca.Function:
         try :
@@ -483,8 +467,6 @@ class TimeInterval :
     # empty set is represented by a double a=None b = None
     def __init__(self, a: Union[float, int] = None, b: Union[float, int] = None) -> None:
         
-        
-        
         if any([a==None,b==None]) and (not all(([a==None,b==None]))) :
             raise ValueError("only empty set is allowed to have None Values in the interval")
         elif  any([a==None,b==None]) and (all(([a==None,b==None]))) : # empty set
@@ -517,13 +499,11 @@ class TimeInterval :
     @property
     def b(self):
         return self._b
-    
     @property
     def period(self) :
         if self.is_empty() :
             return None # empty set has measure None
         return self._b - self._a
-    
     @property
     def aslist(self) :
         return [self._a,self._b]
@@ -533,7 +513,7 @@ class TimeInterval :
             return True
         else:
             return False
-
+        
     def is_singular(self) -> bool:
         a, b = self.a, self.b
         if a == b:
@@ -602,7 +582,6 @@ class TimeInterval :
         a1,b1 = timeInt.a,timeInt.b
         a2,b2 = self._a,self._b
         
-        
         # the empty set is already in this cases since the empty set is included in any other set
         if timeInt<= self :
             return TimeInterval(a =timeInt.a, b = timeInt.b)
@@ -620,29 +599,27 @@ class TimeInterval :
 
 class TemporalOperator(ABC):
     
-    
     @property
     @abstractmethod
     def time_of_satisfaction(self) -> float:
         pass
-    
     @property
     @abstractmethod
     def time_of_remotion(self) -> float:
         pass
-    
     @property
     @abstractmethod
     def time_interval(self) -> TimeInterval:
         pass
-
     @property
     @abstractmethod
     def temporal_type(self) -> str:
         pass
 
+
 class AlwaysOperator(TemporalOperator):
     def __init__(self,time_interval:TimeInterval, temporal_type: str = "AlwaysOperator") -> None:
+
         self._time_interval         : TimeInterval = time_interval
         self._time_of_satisfaction  : float        = self._time_interval.a
         self._time_of_remotion      : float        = self._time_interval.b
@@ -664,16 +641,9 @@ class AlwaysOperator(TemporalOperator):
     
 class EventuallyOperator(TemporalOperator):
     def __init__(self,time_interval:TimeInterval,time_of_satisfaction:float=None, temporal_type: str = "EventuallyOperator") -> None:
-        """ Eventually operator
-        Args:
-            time_interval (TimeInterval): time interval that referes to the eventually operator
-            time_of_satisfaction (float): time at which the eventually operatopr is satisfied
 
-        Raises:
-            ValueError: _description_
-        """
         self._time_interval       : TimeInterval = time_interval
-        self._time_of_satisfaction : float       = time_of_satisfaction
+        self._time_of_satisfaction: float        = time_of_satisfaction
         self._time_of_remotion    : float        = self._time_interval.b
         self._temporal_type       : str          = temporal_type
         
@@ -683,11 +653,9 @@ class EventuallyOperator(TemporalOperator):
         elif time_of_satisfaction<time_interval.a or time_of_satisfaction>time_interval.b :
             raise ValueError(f"For eventually formulas you need to specify a time a satisfaction for the formula in the range of your time interval [{time_interval.a},{time_interval.b}]")
         
-    
     @property
     def time_of_satisfaction(self) -> float:
         return self._time_of_satisfaction
-    
     @property
     def time_of_remotion(self) -> float:
         return self._time_of_remotion
@@ -699,12 +667,11 @@ class EventuallyOperator(TemporalOperator):
         return self._temporal_type
 
 
-
 @dataclass(unsafe_hash=True)
 class StlTask :
-    def __init__(self,predicate:PredicateFunction = None,temporal_operator:TemporalOperator = None) -> None:
+    def __init__(self,predicate: PredicateFunction = None, temporal_operator: TemporalOperator = None) -> None:
          
-        self._predicate              = predicate if predicate is not None else PredicateFunction
+        self._predicate              = predicate         if predicate is not None else PredicateFunction
         self._temporal_operator      = temporal_operator if temporal_operator is not None else TemporalOperator
 
     
@@ -754,9 +721,9 @@ class StlTask :
     def edgeTuple(self):
         return self._predicate.edgeTuple
     
+
     def getHypercubeVertices(self,sourceNode,targetNode:int) -> List[ca.MX]:
         """ computes vertices of hypercube as function of the centerVar and the dimension vector nuVar"""
-        
         return self.predicate.hypercubeVertices(source=sourceNode,target=targetNode)
     
     def computeLinearHypercubeRepresentation(self,sourceNode:int,targetNode:int) -> Tuple[ca.MX,ca.MX] :
@@ -780,7 +747,7 @@ class StlTask :
             # get the represenations of both formulas with the right verse of the edge
             vertices      = formula.getHypercubeVertices(sourceNode=source,targetNode=target)
             A,b           = self.computeLinearHypercubeRepresentation(sourceNode=source,targetNode=target)
-            constraints = []
+            constraints   = []
             for jj in range(numVertices) : # number of vertices of hypercube is computable given the stateSpaceDimension of the problem
                 constraints +=[ A@vertices[:,jj]-b<=np.zeros((self.predicate.stateSpaceDimension*2,1))]
                 
@@ -807,19 +774,14 @@ class StlTask :
         return constraints
     
 
-
-
-
-
-
-
 def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, agent:Agent) ->PredicateFunction:
 
     array_to_list = goal.tolist()  # Convert NumPy array to Python list
-    goal_list = [float(x) for x in array_to_list]  # Convert elements to integers
+    goal_list     = [float(x) for x in array_to_list]  # Convert elements to integers
     
     if agent.symbolic_state.numel() != goal.size:
-        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent.symbolic_state.s) + " and " + str(goal.size) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
+        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent.symbolic_state.s) + " and " + str(goal.size) + 
+                         "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
     
     
     if len(goal.shape) <2 :
@@ -827,24 +789,22 @@ def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, agent:Agent) ->Predi
         
     edge = ca.MX.sym(f"edge_{agent.id}{agent.id}", 2, 1)
 
-    predicate_expression = ( epsilon**2 - ca.dot((agent.symbolic_state - goal),(agent.symbolic_state-goal)) ) # the scaling will make the time derivative smaller whe you built the barrier function
-    predicate_expression_edge = ( epsilon**2 - ca.dot((edge - goal),(edge-goal)) )
+    predicate_expression      = (epsilon**2 - ca.dot((agent.symbolic_state - goal),(agent.symbolic_state-goal))) # the scaling will make the time derivative smaller whe you built the barrier function
+    predicate_expression_edge = (epsilon**2 - ca.dot((edge - goal),(edge-goal)))
 
-    predicate            = ca.Function("position_epsilon_closeness",[agent.symbolic_state],
-                                                                    [predicate_expression],
-                                                                    ["state_"+str(agent.id)],
-                                                                    ["value"]) # this defined an hyperplane function
-    predicate_edge            = ca.Function("position_epsilon_closeness_edge",[edge],
-                                                                    [predicate_expression_edge]) # this defined an hyperplane function
-
+    predicate_edge = ca.Function("go_to_goal_predicate_2d_edge",[edge], [predicate_expression_edge]) 
+    predicate      = ca.Function("go_to_goal_predicate_2d",[agent.symbolic_state], 
+                                                           [predicate_expression], 
+                                                           ["state_"+str(agent.id)], 
+                                                           ["value"]) # this defined an hyperplane function
+    
     return PredicateFunction(function_name="go_to_goal_predicate_2d", function=predicate, function_edge=predicate_edge, center=goal_list, epsilon=epsilon)
 
 
 def epsilon_position_closeness_predicate(epsilon:float, agent_i:Agent, agent_j:Agent) ->PredicateFunction: # Does not need to be called state_1 and state_2
     """
     Helper function to create a closeness relation predicate in the form ||position1-position2|| <= epsilon.
-    This predicate is useful to dictate some closeness relation among two agents for example. The helper function can only be applied of 
-    the models have a states StateName.POSITION2D as a substate. Otherwise the function will give an error.
+    This predicate is useful to dictate some closeness relation among two agents for example.
     
     Args:
         epsilon  : the closeness value
@@ -855,48 +815,49 @@ def epsilon_position_closeness_predicate(epsilon:float, agent_i:Agent, agent_j:A
         PredicateFunction : the predicate function 
     """
 
-
     if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
-        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
+        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + 
+                         "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
     
     edge = ca.MX.sym(f"edge_{agent_i.id}{agent_j.id}", 2, 1)
-    predicate_expression =  ( epsilon**2 - ca.sumsqr(agent_i.symbolic_state - agent_j.symbolic_state) ) # the scaling will make the time derivative smaller whe you built the barrier function
-    predicate_expression_edge = ( epsilon**2 - ca.sumsqr(edge) )
-    predicate            = ca.Function("position_epsilon_closeness",[agent_i.symbolic_state, agent_j.symbolic_state],
-                                                                    [predicate_expression],
-                                                                    ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
-                                                                    ["value"]) # this defined an hyperplane function
 
-    predicate_edge          = ca.Function("position_epsilon_closeness_edge",[edge],[predicate_expression_edge]) # this defined an hyperplane function
+    predicate_expression      = (epsilon**2 - ca.sumsqr(agent_i.symbolic_state - agent_j.symbolic_state)) # the scaling will make the time derivative smaller whe you built the barrier function
+    predicate_expression_edge = (epsilon**2 - ca.sumsqr(edge))
 
+    predicate_edge = ca.Function("epsilon_position_closeness_edge",[edge],[predicate_expression_edge]) 
+    predicate      = ca.Function("epsilon_position_closeness",[agent_i.symbolic_state, agent_j.symbolic_state], 
+                                                              [predicate_expression],
+                                                              ["state_"+str(agent_i.id),"state_"+str(agent_j.id)], 
+                                                              ["value"]) # this defined an hyperplane function
+    
     return PredicateFunction(function_name="epsilon_position_closeness_predicate", function=predicate, function_edge=predicate_edge, epsilon=epsilon)
+
 
 def collision_avoidance_predicate(epsilon:float, agent_i:Agent, agent_j:Agent) ->PredicateFunction: # Does not need to be called state_1 and state_2
 
 
     if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
-        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
+        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + 
+                         "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
     
     edge = ca.MX.sym(f"edge_{agent_i.id}{agent_j.id}", 2, 1)
 
-    predicate_expression =  (ca.sumsqr(agent_i.symbolic_state - agent_j.symbolic_state) - epsilon**2) # the scaling will make the time derivative smaller whe you built the barrier function
+    predicate_expression      = (ca.sumsqr(agent_i.symbolic_state - agent_j.symbolic_state) - epsilon**2) # the scaling will make the time derivative smaller whe you built the barrier function
     predicate_expression_edge = (ca.sumsqr(edge) - epsilon**2)
 
-    predicate            = ca.Function("position_epsilon_closeness",[agent_i.symbolic_state, agent_j.symbolic_state],
-                                                                    [predicate_expression],
-                                                                    ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
-                                                                    ["value"]) # this defined an hyperplane function
-
-    predicate_edge          = ca.Function("position_epsilon_closeness_edge",[edge],[predicate_expression_edge]) # this defined an hyperplane function
-
+    predicate_edge = ca.Function("collision_avoidance_edge",[edge],[predicate_expression_edge]) 
+    predicate      = ca.Function("collision_avoidance",[agent_i.symbolic_state, agent_j.symbolic_state], 
+                                                       [predicate_expression],
+                                                       ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
+                                                       ["value"]) # this defined an hyperplane function
+    
     return PredicateFunction(function_name="collision_avoidance_predicate", function=predicate, function_edge=predicate_edge, epsilon=epsilon)
 
 
 def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_pos:np.ndarray, direction_i_to_j:bool=True) ->PredicateFunction:
     """
     Helper function to create a closeness relation predicate witha  certain relative position vector. in the form ||position1-position2|| <= epsilon.
-    This predicate is useful to dictate some closeness relation among two agents for example. The helper function can only be applied of 
-    the models have a states StateName.POSITION2D as a substate. Otherwise the function will give an error.
+    This predicate is useful to dictate some closeness relation among two agents for example. 
     
     Args:
         epsilon  : the closeness value
@@ -906,30 +867,30 @@ def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_po
     Returns:
         PredicateFunction : the predicate function 
     """
-    array_to_list = relative_pos.tolist()  # Convert NumPy array to Python list
+    array_to_list     = relative_pos.tolist()  # Convert NumPy array to Python list
     relative_pos_list = [float(x) for x in array_to_list]  # Convert elements to integers
 
     if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
-        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
+        raise ValueError("The two dynamical models have different position dimensions. Namely " + str(agent_i.symbolic_state.shape) + " and " + str(agent_j.symbolic_state.shape) + 
+                         "\n If you want to construct an epsilon closeness predicate use two models that have the same position dimension")
     
     if relative_pos.shape[0] != agent_i.symbolic_state.shape[0]:
-        raise ValueError("The relative position vector must have the same dimension as the position of the agents. Agents have position dimension " + str(agent_i.symbolic_state.shape) + " and the relative position vector has dimension " + str(relative_pos.shape) )
+        raise ValueError("The relative position vector must have the same dimension as the position of the agents. Agents have position dimension " 
+                         + str(agent_i.symbolic_state.shape) + " and the relative position vector has dimension " + str(relative_pos.shape) )
     
     edge = ca.MX.sym(f"edge_{agent_i.id}{agent_j.id}", 2, 1)
     if direction_i_to_j :
-        predicate_expression =  ( epsilon**2 - (agent_j.symbolic_state - agent_i.symbolic_state- relative_pos).T@(agent_j.symbolic_state-agent_i.symbolic_state - relative_pos) ) # the scaling will make the time derivative smaller whe you built the barrier function
-        
+        predicate_expression =  (epsilon**2 - (agent_j.symbolic_state - agent_i.symbolic_state- relative_pos).T@(agent_j.symbolic_state-agent_i.symbolic_state - relative_pos)) # the scaling will make the time derivative smaller whe you built the barrier function   
     else :
-        predicate_expression =  ( epsilon**2 - (agent_i.symbolic_state - agent_j.symbolic_state- relative_pos).T@(agent_i.symbolic_state-agent_j.symbolic_state - relative_pos) )
+        predicate_expression =  (epsilon**2 - (agent_i.symbolic_state - agent_j.symbolic_state- relative_pos).T@(agent_i.symbolic_state-agent_j.symbolic_state - relative_pos))
 
-    predicate_expression_edge = ( epsilon**2 - (edge-relative_pos).T@(edge-relative_pos) )
-    predicate            = ca.Function("position_epsilon_closeness",[agent_i.symbolic_state,agent_j.symbolic_state],
-                                                                    [predicate_expression],
-                                                                    ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
-                                                                    ["value"]) # this defined an hyperplane function
+    predicate_expression_edge = (epsilon**2 - (edge-relative_pos).T@(edge-relative_pos))
 
-    predicate_edge          = ca.Function("position_epsilon_closeness_edge",[edge],
-                                                                    [predicate_expression_edge]) # this defined an hyperplane function
+    predicate_edge = ca.Function("position_epsilon_closeness_edge",[edge], [predicate_expression_edge]) 
+    predicate      = ca.Function("position_epsilon_closeness",[agent_i.symbolic_state,agent_j.symbolic_state],
+                                                              [predicate_expression],
+                                                              ["state_"+str(agent_i.id),"state_"+str(agent_j.id)],
+                                                              ["value"]) # this defined an hyperplane function
 
     return PredicateFunction(function_name="formation_predicate", function=predicate, function_edge=predicate_edge,center=relative_pos_list, epsilon=epsilon)
 
@@ -938,7 +899,7 @@ def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha
     Function to compute the conjunction of barrier functions. The function takes a variable number of barrier functions as input and returns a new barrier function that is the conjunction of the input barrier functions.
     
     Args:
-        *args (BarrierFunction): Variable number of barrier functions.
+        List[BarrierFunction]: Variable number of barrier functions.
     
     Returns:
         BarrierFunction: The barrier function representing the conjunction of the input barrier functions.
@@ -971,7 +932,6 @@ def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha
         
     # the barriers are all functions of some agents state and time. So we create such variables   minimum_approximation -> -1/eta log(sum -eta * barrier_i)
     inputs = {}
-    
     for agent_id in contributing_agents :
         inputs["state_"+str(agent_id)] = ca.MX.sym("state_"+str(agent_id),barrier.function.size1_in("state_"+str(agent_id)))
     
@@ -985,11 +945,9 @@ def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha
     inf_switch = ca.Function("inf_switch",[dummy],[ca.if_else(dummy==1.,1.,10**20)]) 
     sum_switch = 0 # sum of the switches will be the final switch. namely, it will be zero when all the switches are zero
     
-    
     min_list = []
     sum = 0
     eta = 10
-    
     
     for barrier in barrier_list:
         # gather the inputs for this barrier
@@ -997,14 +955,13 @@ def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha
         switch : ca.Function = barrier.switch_function
         
         for agent_id in barrier.contributing_agents :
-            barrier_inputs["state_"+str(agent_id)] = inputs["state_"+str(agent_id)] # gather the inputs for this barrier
+            barrier_inputs["state_"+str(agent_id)] = inputs["state_"+str(agent_id)] # gather the inputs for this barrier     
         barrier_inputs["time"] = inputs["time"] 
-        sum_switch += switch(dummy) 
+
+        sum_switch += switch(dummy)  
+        sum        += ca.exp(-eta*barrier.function.call(barrier_inputs)["value"]) # sum of the exponentials
         
-        
-        sum += ca.exp(-eta*barrier.function.call(barrier_inputs)["value"]) # sum of the exponentials
-        
-        min_list.append(  barrier.function.call(barrier_inputs)["value"] + inf_switch(switch(barrier_inputs["time"]))  )
+        min_list.append(barrier.function.call(barrier_inputs)["value"] + inf_switch(switch(barrier_inputs["time"])))
     
     
     #create the final switch function
@@ -1027,7 +984,7 @@ def create_barrier_from_task(task:StlTask, initial_conditions:List[Agent], alpha
     
     Args:
         task (StlTask)                            : the task for which the barrier function is to be created
-        initial_conditions (dict[UniqueIdentifier,np.ndarray]) : the initial conditions of the agents
+        initial_conditions (List[Agent])          : the initial conditions of the agents
         alpha_function (ca.Function)              : the associated alpha function to be used for barrier constraint construction
         t_init (float)                            : the initial time of the barrier function in terms of the time to which the barrier should start
         
@@ -1040,24 +997,26 @@ def create_barrier_from_task(task:StlTask, initial_conditions:List[Agent], alpha
     
     # check that all the agents are present
     if not all(any(agent_id == agent.id for agent in initial_conditions) for agent_id in contributing_agents):
-        raise ValueError("The initial conditions for the contributing agents are not complete. Contributing agents are " + str(contributing_agents) + " and the initial conditions are given for " + str(initial_conditions.keys()))
+        raise ValueError("The initial conditions for the contributing agents are not complete. Contributing agents are " + str(contributing_agents) + 
+                         " and the initial conditions are given for " + str(initial_conditions.keys()))
     
     # # check that the sates sizes match
     for agent in initial_conditions:
         if not (task.predicate.function.size1_in("state_"+str(agent.id)) == agent.symbolic_state.shape[0]):
-            raise ValueError("The initial condition for agent " + str(agent.id) + " has a different size than the state of the agent. The size of the state is " + str(task.predicate.function.size1_in("state_"+str(agent.id))) + " and the size of the initial condition is " + str(agent.symbolic_state.shape[0]))
+            raise ValueError("The initial condition for agent " + str(agent.id) + 
+                             " has a different size than the state of the agent. The size of the state is " + str(task.predicate.function.size1_in("state_"+str(agent.id))) + 
+                             " and the size of the initial condition is " + str(agent.symbolic_state.shape[0]))
 
     # determine the initial values of the barrier function 
-    initial_inputs = {state_name_str(agent.id): agent.state for agent in initial_conditions} # create a dictionary with the initial state of the agents
+    initial_inputs  = {state_name_str(agent.id): agent.state for agent in initial_conditions} # create a dictionary with the initial state of the agents
     symbolic_inputs = {}
 
     # STATE SYMBOLIC INPUT
     for agent in initial_conditions:
         symbolic_inputs["state_"+str(agent.id)] = ca.MX.sym("state_"+str(agent.id), task.predicate.function.size_in("state_"+str(agent.id))) # create a dictionary with the initial state of the agents
         
-
     predicate_fun = task.predicate.function
-    predicate_initial_value =  predicate_fun.call(initial_inputs)["value"]
+    predicate_initial_value  = predicate_fun.call(initial_inputs)["value"]
     symbolic_predicate_value = predicate_fun.call(symbolic_inputs)["value"]
         
     
@@ -1072,8 +1031,9 @@ def create_barrier_from_task(task:StlTask, initial_conditions:List[Agent], alpha
     
     time_of_satisfaction = task.temporal_operator.time_of_satisfaction
     time_of_remotion     = task.temporal_operator.time_of_remotion
+
     # for each barrier we now create a time transient function :
-    time_var                  = ca.MX.sym("time",1) # create a symbolic variable for time 
+    time_var = ca.MX.sym("time", 1) # create a symbolic variable for time 
     
     # now we adopt a scaling of the barrier so that the constraint is more feasible. 
     
@@ -1116,7 +1076,7 @@ def create_barrier_from_task(task:StlTask, initial_conditions:List[Agent], alpha
     
     
     # now add time to the inputs and find symbolic value of the barrier function
-    symbolic_inputs["time"] = time_var # add time to the inputs
+    symbolic_inputs["time"]  = time_var # add time to the inputs
     barrier_symbolic_output  = (symbolic_predicate_value + gamma) 
     
     # now we create the barrier function. We will need to create the input/output names and the symbolic inputs

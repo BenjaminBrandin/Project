@@ -1,10 +1,10 @@
+import itertools
 import numpy as np
 import casadi as ca
-import itertools
-from builders import StlTask, TimeInterval, TemporalOperator, AlwaysOperator, EventuallyOperator, PredicateFunction, globalOptimizer
-from graph_module import EdgeTaskContainer
 import networkx as nx
 from typing import Tuple , List, Dict
+from graph_module import EdgeTaskContainer
+from builders import StlTask, TimeInterval, PredicateFunction, globalOptimizer
 
 
 def allNonParametric(listOfFormulas : List[StlTask]) -> bool :
@@ -107,7 +107,7 @@ def pathMinkowskiSumVertices(listOfFormulas : List[StlTask], edgeList: List[Tupl
     
     Inputs
     --------------------------------------------------
-    listOfFormulas (list<STLFormula>)
+    listOfFormulas (list<StlTask>)
     
     Outputs
     -----------------------------------------
@@ -167,15 +167,8 @@ def computeOverloadingConstraints(edgeObj: EdgeTaskContainer) -> List[ca.Functio
     # Main assumption check
     alwaysFormulas :list[StlTask]= [formula for formula in formulas if formula.temporal_operator.temporal_type=="AlwaysOperator"]
     eventuallyFormulas : list[StlTask] = [formula for formula in formulas if formula.temporal_operator.temporal_type=="EventuallyOperator"]
-    # print("always formulas:",alwaysFormulas)
     constraints = []
 
-    # print("====================================")
-    # print(f"Formulas on one edge: {formulas}")
-    # print(f"Always formulas: {alwaysFormulas}")
-    # print(f"Eventually formulas: {eventuallyFormulas}")
-    # print("====================================")
-    
     sameTimeInterval = False
     if isThereMultipleIntersection(formulasList=alwaysFormulas) :
         if not haveSameTimeInterval(listOfFormulas=alwaysFormulas) : # if there are multiple intersections then they must have the same time interval
@@ -184,7 +177,7 @@ def computeOverloadingConstraints(edgeObj: EdgeTaskContainer) -> List[ca.Functio
             sameTimeInterval = True # flag so that computation does not have to be redone
             
     # PART 1 : resolve always vs always formulas intersections
-    if sameTimeInterval : # all the always formulas have the same time interval
+    if sameTimeInterval: # all the always formulas have the same time interval
         sharedTimeInterval = alwaysFormulas[0].time_interval
         
         if allParametric(alwaysFormulas) :
@@ -207,9 +200,7 @@ def computeOverloadingConstraints(edgeObj: EdgeTaskContainer) -> List[ca.Functio
                 alwaysFormulas = nonParametricFormulas + parametricFormulas # we reorder the always formulas such that the non parameteric formula is at the beginning. SO the sequence of inclusions is now correct
                 for index in range(len(alwaysFormulas)-1) :
                     parentFormula = alwaysFormulas[index]
-                    # print("parent edge:",parentFormula.edgeTuple)
                     childFormula  = alwaysFormulas[index+1]
-                    # print("child edge:",childFormula.edgeTuple)
                     constraints  += parentFormula.getConstraintFromInclusionOf(childFormula)
         
         innerMostAlwaysFormula = alwaysFormulas[-1] # the always formula the is the last one to receive an inclusion constraint. All the other formulas include this one
@@ -225,9 +216,9 @@ def computeOverloadingConstraints(edgeObj: EdgeTaskContainer) -> List[ca.Functio
             combinations   = itertools.combinations(range(len(alwaysFormulas)),2) # all possible combinations of always formulas
 
             # check which combinations have intersections of time intervals and act accordingly
-            for combo in combinations :
-                formulaI:StlTask       = formulas[combo[0]]
-                formulaJ:StlTask       = formulas[combo[1]]
+            for combo in combinations:
+                formulaI:StlTask          = formulas[combo[0]]
+                formulaJ:StlTask          = formulas[combo[1]]
                 intersection:TimeInterval = formulaI.time_interval / formulaJ.time_interval
                 
                 if not intersection.is_empty() :
@@ -267,17 +258,19 @@ def computeOverloadingConstraints(edgeObj: EdgeTaskContainer) -> List[ca.Functio
 def createCycleClosureConstraint(cycleEdgeObjs : List[EdgeTaskContainer],cycleEdges : List[Tuple[int,int]]) -> List[ca.MX] :
 
     constraints = []
-    if len(cycleEdgeObjs)==0 :
+    if len(cycleEdgeObjs)==0:
         return []
     
     cycleFormulas        : list[list[StlTask]] = [edge.task_list for edge in cycleEdgeObjs]
     possibleCombinations : list[list[StlTask]] = itertools.product(*cycleFormulas) # all possible combinations of formulas closing a cycle 
     stateSpaceDim        = cycleFormulas[0][0].predicate.stateSpaceDimension
-    for combination in possibleCombinations :
+    
+    for combination in possibleCombinations:
         # each combination represent a combinaton of formulas that can possibly close the cycle
-        alwaysFormulasInCombination = [formula for formula in combination if formula.temporal_operator == "AlwaysOperator" ]
-        eventuallyFormulasInCombination = [formula for formula in combination if formula.temporal_operator == "EventuallyOperator" ]
-        if not allNonParametric(combination) :
+        alwaysFormulasInCombination     = [formula for formula in combination if formula.temporal_operator == "AlwaysOperator"]
+        eventuallyFormulasInCombination = [formula for formula in combination if formula.temporal_operator == "EventuallyOperator"]
+        
+        if not allNonParametric(combination):
             
             # Case 1: all always formulas 
             if len(combination) == len(alwaysFormulasInCombination) and len(alwaysFormulasInCombination)!=0:
@@ -289,8 +282,6 @@ def createCycleClosureConstraint(cycleEdgeObjs : List[EdgeTaskContainer],cycleEd
                     for formula in combination:
                         if not formula.isParametric :
                             formula.predicate.computeCuboidApproximation() # you need to make the replacement of the originaal predicate with its cuboid under-approximation
-                            # print(formula.predicate.optimalApproximationCenter)
-                            # print(formula.predicate.optimalApproximationNu)
                     constraints += computeMinkowskiInclusionConstraintsForCycle(cycleFormulas = combination,stateSpaceDimension = stateSpaceDim,cycleEdges = cycleEdges)
             
             # Case 2:  case in which there are also eventually formulas 
@@ -311,7 +302,7 @@ def createCycleClosureConstraint(cycleEdgeObjs : List[EdgeTaskContainer],cycleEd
                 
                     requiresConstraint = True
                     intervalChecker = eventuallyFormulasInCombination[0].time_interval 
-                    for eventuallyFormula in eventuallyFormulasInCombination[1:] :  
+                    for eventuallyFormula in eventuallyFormulasInCombination[1:]:  
                         if not eventuallyFormula.time_interval.is_singular():    
                             requiresConstraint = False
                             break # in case even only one eventually formula has non-singular time interval (singular time interval means like [t,t]) then you don't need to add constraints
@@ -408,38 +399,33 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict
     """ Solves the task decomposition completely"""
     
     numberOfVerticesHypercube = 2**problemDimension
-    originalTaskGraph = task_graph.copy()
-    
     
     pathsList                   : list[list[int]] = []
-    pathConstraints             : list[ca.MX] = []
-    overloadingConstraints      : list[ca.MX] = []
-    cyclesConstraints           : list[ca.MX] = []
-    maxCommunicationConstraints : list[ca.MX] = []
-    positiveNuConstraint        : list[ca.MX] = []
+    pathConstraints             : list[ca.MX]     = []
+    overloadingConstraints      : list[ca.MX]     = []
+    cyclesConstraints           : list[ca.MX]     = []
+    maxCommunicationConstraints : list[ca.MX]     = []
+    positiveNuConstraint        : list[ca.MX]     = []
 
     decompositionOccurred = False
-    decompositionSolved = []
+    decompositionSolved   = []
+    edges_to_remove       = []
 
-    edges_to_remove = []
-    for task_name, (task_key, task_dict) in enumerate(comm_info.items()):
+    for (task_key, task_dict) in enumerate(comm_info.values()):
 
-        edge = task_dict["EDGE"]
-        edge_container: EdgeTaskContainer = task_graph[edge[0]][edge[1]]["container"] 
-        has_tasks = len(edge_container.task_list) > 0
-        isCommunicating = task_dict["COMMUNICATE"]
+        edge            :List[int]         = task_dict["EDGE"]
+        edge_container  :EdgeTaskContainer = task_graph[edge[0]][edge[1]]["container"] 
+        has_tasks       :bool              = len(edge_container.task_list) > 0
+        isCommunicating :bool              = task_dict["COMMUNICATE"]
     
 
-        if (isCommunicating == False) and (has_tasks): 
+        if (not isCommunicating) and (has_tasks): 
             decompositionOccurred = True
             edges_to_remove.append(tuple(edge))
 
-            
             # retrive all the formulas to be decomposed
             formulasToBeDecomposed: list[StlTask] = [task for task in edge_container.task_list]
 
-            
-            
             # path finding and grouping nodes
             path = nx.shortest_path(comm_graph,source=edge[0],target=edge[1]) # path of agents from start to end
             pathsList.append(path) # save sources list for later plotting
@@ -448,7 +434,6 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict
             for formula in formulasToBeDecomposed : # add a new set of formulas for each edge
                 edgeSubformulas : list[StlTask] = [] # list of subformulas associate to one orginal formula. you have as many subformulas as number of edges
                 
-
                 originalTemporalOperator       = formula.temporal_operator                      # get time interval of the orginal operator
                 originalPredicate              = formula.predicate                              # get the predicate function
                 originalEdgeTuple              = tuple(formula.contributing_agents)             # get the edge tuple
@@ -465,10 +450,8 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict
                     subformula = StlTask(predicate=PredicateFunction(function_name=originalPredicate.function_name, function=None, function_edge=originalPredicate.function_edge, sourceNode=sourceNode, targetNode=targetNode, center=originalPredicate.center, epsilon=originalPredicate.epsilon), temporal_operator=originalTemporalOperator)
                     
                     # warm start of the variables involved in the optimization TODO: check if you have a better warm start base on the specification you have. Maybe some more intelligen heuristic
-                    globalOptimizer.set_initial(subformula.centerVar , start_position[targetNode]-start_position[sourceNode]) # target - source: Following the original
-
-
-                    globalOptimizer.set_initial(subformula.nuVar   , np.ones(problemDimension)*4)
+                    globalOptimizer.set_initial(subformula.centerVar, start_position[targetNode]-start_position[sourceNode]) # target - source: Following the original
+                    globalOptimizer.set_initial(subformula.nuVar, np.ones(problemDimension)*4)
 
                     # add subformulas to the current path
                     edgeSubformulas.append(subformula)
@@ -486,8 +469,8 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict
                    
                 
                 # now set that the final i sum has to stay inside the original predicate
-                minowkySumVertices  = pathMinkowskiSumVertices( edgeSubformulas ,  edgesThroughPath)  # return the symbolic vertices f the hypercube to define the constraints
-                for jj in range(numberOfVerticesHypercube) :
+                minowkySumVertices  = pathMinkowskiSumVertices(edgeSubformulas,  edgesThroughPath)  # return the symbolic vertices f the hypercube to define the constraints
+                for jj in range(numberOfVerticesHypercube):
                     pathConstraints.append(originalPredicate.function_edge(minowkySumVertices[:,jj])<=0) # for each vertex of the minkowski sum ensure they are inside the original predicate superlevel-set
             
             decompositionSolved.append((path,edgeSubformulas))    
@@ -495,23 +478,15 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict
             # mark all the used edges for the optimization
             edgesThroughPath = edgeSet(path=path) # find edges along the path
             # flag the edges applied for the optimization 
-            for sourceNode,targetNode in   edgesThroughPath :
-                    task_graph[sourceNode][targetNode]["container"].flagOptimizationInvolvement()
+            for sourceNode,targetNode in edgesThroughPath :
+                task_graph[sourceNode][targetNode]["container"].flagOptimizationInvolvement()
 
     # Remove the edges that have been decomposed
-    # print("====================================")
-    # print(f"PathsList: {pathsList}")
-    # print(f"EdgesThroughPath: {edgesThroughPath}")
-    # print("Edges in task_graph: ", task_graph.edges(data=True))
-    # print("Edges to remove: ", edges_to_remove)
     task_graph.remove_edges_from(edges_to_remove)
-    # print("Edges in task_graph: ", task_graph.edges(data=True))
-    # print("====================================")
-
     
     if decompositionOccurred :
         # adding cycles constraints to the optimization problem
-        cycles :list[list[int]]   = sorted(nx.simple_cycles(task_graph))
+        cycles :list[list[int]] = sorted(nx.simple_cycles(task_graph))
         cycles = [cycle for cycle in cycles if len(cycle)>1] # eliminate self loopscycles)
         for omega in cycles :
             cycleEdges    = edgeSet(omega,isCycle=True)
@@ -522,7 +497,6 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict
         # one line of overloading constraints
         optimisedEdges = [(i,j,attr["container"]) for i,j,attr in task_graph.edges(data=True) if attr["container"].involved_in_optimization] #list of edges that contain formulas that were created in the task decomposition 
         for i,j,attr in optimisedEdges:
-            # print(i,j)
             overloadingConstraints += computeOverloadingConstraints(attr)
         
                 
@@ -554,7 +528,6 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict
         for i,j,attr in optimisedEdges:
             newFormulasCount += len([formula for formula in attr.task_list if formula.isParametric])
         
-        
         print("-----------------------------------------")   
         print("Internal Report")   
         print("-----------------------------------------")   
@@ -572,6 +545,3 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict
                 print(f"INTERVAL: {formula.time_interval.aslist}")
                 print(f"INVOLVED_AGENTS: {formula.contributing_agents}")
                 print("===================================")
-
-
-

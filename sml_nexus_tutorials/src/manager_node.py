@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-import rospy
-from custom_msg.msg import task_msg
-from std_msgs.msg import Int32
 import yaml
+import rospy
 import numpy as np
-import casadi as ca
 import networkx as nx
-from builders import Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, go_to_goal_predicate_2d, formation_predicate, create_barrier_from_task, epsilon_position_closeness_predicate, collision_avoidance_predicate
+from std_msgs.msg import Int32
 import matplotlib.pyplot as plt
-from graph_module import EdgeTaskContainer, create_communication_graph_from_states, create_task_graph_from_edges
 from custom_msg.msg import task_msg
 from decomposition_module import computeNewTaskGraph
+from graph_module import create_communication_graph_from_states, create_task_graph_from_edges
+from builders import (Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOperator, go_to_goal_predicate_2d, 
+                      formation_predicate, epsilon_position_closeness_predicate, collision_avoidance_predicate)
+
 
 class Manager():
 
@@ -24,7 +24,7 @@ class Manager():
         self.agents = {}
         self.scale_factor = 3
         self.total_tasks = 0
-        communication_radius = 3
+
         
         # setup publishers
         self.task_pub = rospy.Publisher("tasks", task_msg, queue_size=10)
@@ -40,32 +40,31 @@ class Manager():
         # Initial states of the robots and creating the robots
         start_positions: dict[int, np.ndarray] = {}
         for i, (state_key, state_value) in enumerate(self.start_pos.items(), start=1):
-            state = np.array(state_value)
-            agent = Agent(id=i, initial_state=state)
-            self.agents[i] = agent
-            start_positions[i] = state
+            self.agents[i] = Agent(id=i, initial_state=np.array(state_value))
+            start_positions[i] = np.array(state_value)
 
         # Extracting the edges of the tasks and the communication information
         task_edges = [tuple(task["EDGE"]) for task in self.tasks.values()]
         communication_info = {task_name: {"EDGE": task_info["EDGE"], "COMMUNICATE": task_info["COMMUNICATE"]} for task_name, task_info in self.tasks.items()}
 
         # Creating the graphs
-        # self.comm_graph = create_communication_graph_from_states(start_positions, communication_radius) # change so that communication is distance based
         self.comm_graph = create_communication_graph_from_states(self.agents.keys(), communication_info) 
         self.task_graph = create_task_graph_from_edges(edge_list = task_edges) # creates an empty task graph
         self.initial_task_graph = self.task_graph.copy()
 
+        # Fill the task graph with the tasks and decompose the edges that are not communicative
         self.update_graph()
         computeNewTaskGraph(self.task_graph, self.comm_graph, communication_info, start_position=start_positions)
         
+        # publish the tasks
         self.print_tasks()
-        self.plot_graph() # If you comment out this line, you need rospy.sleep(6) before self.publish_tasks() to ensure the control nodes have loaded
+        self.plot_graph()
         self.publish_numOfTask()
         self.publish_tasks()
 
 
     def update_graph(self):
-        for task_name, task_info in self.tasks.items():
+        for task_info in self.tasks.values():
             # Create the task
             task = self.create_task(task_info)
             # Add the task to the edge
@@ -75,14 +74,20 @@ class Manager():
     def create_task(self, task_info) -> StlTask:
         # Create the predicate based on the type of the task
         if task_info["TYPE"] == "go_to_goal_predicate_2d":
-            predicate = go_to_goal_predicate_2d(goal=np.array(task_info["CENTER"]), epsilon=task_info["EPSILON"], agent=self.agents[task_info["INVOLVED_AGENTS"][0]])
+            predicate = go_to_goal_predicate_2d(goal=np.array(task_info["CENTER"]), epsilon=task_info["EPSILON"], 
+                                                agent=self.agents[task_info["INVOLVED_AGENTS"][0]])
         elif task_info["TYPE"] == "formation_predicate":
-            predicate = formation_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]], relative_pos=np.array(task_info["CENTER"]))
+            predicate = formation_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], 
+                                            agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]], relative_pos=np.array(task_info["CENTER"]))
         elif task_info["TYPE"] == "epsilon_position_closeness_predicate":
-            predicate = epsilon_position_closeness_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]])
+            predicate = epsilon_position_closeness_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], 
+                                                             agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]])
         elif task_info["TYPE"] == "collision_avoidance_predicate":
-            predicate = collision_avoidance_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]])
-            
+            predicate = collision_avoidance_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], 
+                                                      agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]])
+        else:
+            raise Exception("Task type" + str(task_info["TYPE"]) + "is not supported")
+        
         # Create the temporal operator
         if task_info["TEMP_OP"] == "AlwaysOperator":
             temporal_operator = AlwaysOperator(time_interval=TimeInterval(a=task_info["INTERVAL"][0], b=task_info["INTERVAL"][1]))
@@ -105,6 +110,7 @@ class Manager():
         nx.draw(graph, with_labels=True, font_weight='bold', ax=ax)
         ax.set_title(title)
 
+
     def print_tasks(self):
         for i,j,attr in self.task_graph.edges(data=True):
             tasks = attr["container"].task_list
@@ -120,6 +126,8 @@ class Manager():
                 print(f"INVOLVED_AGENTS: {task.contributing_agents}")
                 print(f"COMMUNICATE: {True}")
                 print("-----------------------------------")
+        rospy.sleep(0.5)
+        
 
     def publish_tasks(self):
         tasks: list[StlTask] = []
@@ -128,13 +136,13 @@ class Manager():
             for task in tasks:
                 task_message = task_msg()
                 task_message.edge = list(task.edgeTuple)
-                task_message.type = task.type                               # This is a placeholder for now
-                task_message.center = task.center                           # This is a placeholder for now
-                task_message.epsilon = task.epsilon                         # This is a placeholder for now
+                task_message.type = task.type                               
+                task_message.center = task.center                           
+                task_message.epsilon = task.epsilon                         
                 task_message.temp_op = task.temporal_type
                 task_message.interval = task.time_interval.aslist
                 task_message.involved_agents = task.contributing_agents
-                task_message.communicate = True                             # This is a placeholder for now
+                task_message.communicate = True                             
 
                 # Then publish the message
                 self.task_pub.publish(task_message)
@@ -145,7 +153,6 @@ class Manager():
         flag.data = self.total_tasks
         self.numOfTasks_pub.publish(flag)
         
-
 
 if __name__ == "__main__":
     manager = Manager()
