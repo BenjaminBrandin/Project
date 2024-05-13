@@ -31,6 +31,16 @@ UniqueIdentifier = int
 
 @dataclass(unsafe_hash=True)
 class EdgeTaskContainer:
+    """
+    Data class representing a graph edge, containing all the STL tasks defined over this edge.
+
+    Attributes:
+        _edge_tuple               (Tuple[UniqueIdentifier, UniqueIdentifier])  : Tuple of the edge.
+        _weight                   (float)                                      : Weight of the edge.
+        _task_list                (List[StlTask])                              : List of tasks of the edge.
+        _involved_in_optimization (int)                                        : Flag that indicates if the edge is involved in the optimization or not.
+    """
+
     _edge_tuple: Tuple[UniqueIdentifier,UniqueIdentifier]
     _weight: float = 1
     _task_list: List[StlTask] = field(default_factory=list)
@@ -39,8 +49,18 @@ class EdgeTaskContainer:
 
     def __init__(self, 
                  edge_tuple: Tuple[UniqueIdentifier,UniqueIdentifier] = None, 
-                 weight: float = None, task_list:List[StlTask] = None, 
+                 weight: float = None, 
+                 task_list:List[StlTask] = None, 
                  involved_in_optimization: int = None):
+        """
+        Initializes the EdgeTaskContainer object.
+
+        Args:
+            edge_tuple               (Tuple[UniqueIdentifier, UniqueIdentifier])  : The tuple representing the edge.
+            weight                   (float)                                      : The weight of the edge.
+            task_list                (List[StlTask])                              : The list of tasks associated with the edge.
+            involved_in_optimization (int)                                        : Flag indicating if the edge is involved in optimization or not.
+        """
 
         self._edge_tuple               = edge_tuple               if edge_tuple is not None else (UniqueIdentifier(), UniqueIdentifier())
         self._weight                   = weight                   if weight is not None else 1
@@ -49,17 +69,21 @@ class EdgeTaskContainer:
 
 
     @property
-    def edge_tuple(self):
+    def edge_tuple(self) -> Tuple[UniqueIdentifier, UniqueIdentifier]:
+        """Returns the tuple of the edge."""
         return self._edge_tuple
     @property
-    def weight(self):
+    def weight(self) -> float:
+        """Returns the weight of the edge."""
         return self._weight
     @property
-    def task_list(self):
+    def task_list(self) -> List[StlTask]:
+        """Returns the list of tasks of the edge."""
         return self._task_list
     @property
-    def involved_in_optimization(self) :
-      return self._involved_in_optimization
+    def involved_in_optimization(self) -> int:
+        """Returns the flag that indicates if the edge is involved in the optimization or not."""
+        return self._involved_in_optimization
       
 
     def __post_init__(self):
@@ -86,6 +110,7 @@ class EdgeTaskContainer:
             
     # check task addition
     def add_tasks(self, tasks:Union[StlTask, List[StlTask]]):
+        """ Add a single task or a list of tasks to the edge. """
         if isinstance(tasks, list): 
             for task in tasks:
                 self._add_single_task(task)
@@ -95,11 +120,20 @@ class EdgeTaskContainer:
     def cleanTasks(self)-> None :
         self.task_list      = []
 
-    def flagOptimizationInvolvement(self) -> None :
+    def flagOptimizationInvolvement(self) -> None:
         self._involved_in_optimization = 1
     
 
 def create_task_graph_from_edges(edge_list:Union[List[EdgeTaskContainer], List[Tuple[UniqueIdentifier, UniqueIdentifier]]]) -> nx.Graph:
+    """
+    Create a task graph from a list of edges. 
+
+    Args:
+        edge_list (List[EdgeTaskContainer] or List[Tuple[UniqueIdentifier, UniqueIdentifier]]): List of edges to create the task graph.
+
+    Returns:
+        task_graph (nx.Graph): The task graph created from the edges.
+    """
     task_graph = nx.Graph()
     for edge in edge_list:
         task_graph.add_edge(edge[0], edge[1], container=EdgeTaskContainer(edge_tuple=edge))
@@ -107,7 +141,20 @@ def create_task_graph_from_edges(edge_list:Union[List[EdgeTaskContainer], List[T
     return task_graph
 
 
-def create_communication_graph_from_states(states: List[int], communication_info: Dict[str, Dict]) -> nx.Graph :
+def create_communication_graph_from_states(states: List[int], communication_info: Dict[str, Dict]) -> nx.Graph:
+    """
+    Create a communication graph that is telling which states are communicating with each other.
+
+    Args:
+        states (List[int]): List of states.
+        communication_info (Dict[str, Dict]): Communication information.
+
+    Returns:
+        comm_graph (nx.Graph): The communication graph.
+
+    Raises:
+        Exception: If the edge is not compatible with the states.
+    """
     comm_graph = nx.Graph()
     comm_graph.add_nodes_from(states)
 

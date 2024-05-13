@@ -1,3 +1,27 @@
+"""
+MIT License
+
+Copyright (c) [2024] [Gregorio Marchesini]
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+
 #!/usr/bin/env python3
 import itertools
 import numpy as np
@@ -15,6 +39,7 @@ def first_word_before_underscore(string: str) -> str:
 
 
 def check_barrier_function_input_names(barrier_function: ca.Function)-> bool:
+    """Check if the input names of the barrier function are in the form 'time' and 'state_i' where ''i'' is the agent ID."""
     for name in barrier_function.name_in():
         if not first_word_before_underscore(name) in ["state","time"]:
             return False
@@ -22,6 +47,7 @@ def check_barrier_function_input_names(barrier_function: ca.Function)-> bool:
 
 
 def check_barrier_function_output_names(barrier_function: ca.Function)->bool:
+    """Check if the output name of the barrier function is 'value'."""
     for name in barrier_function.name_out():
         if not first_word_before_underscore(name) == "value":
             return False
@@ -29,6 +55,7 @@ def check_barrier_function_output_names(barrier_function: ca.Function)->bool:
 
 
 def is_time_state_present(barrier_function: ca.Function) -> bool:
+    """Check if the time variable is present in the input names of the barrier function."""
     return "time" in barrier_function.name_in() 
 
 
@@ -96,9 +123,21 @@ def get_id_from_input_name(input_name: str) -> UniqueIdentifier:
 
 class Agent:
     """
-    This class is used to store the information about an agent. 
+    Stores information about an agent.
+
+    Attributes:
+        id              (int)           : The unique identifier of the agent.
+        symbolic_state  (ca.MX)         : The symbolic representation of the agent's state.
+        state           (np.ndarray)    : The initial state of the agent.
     """
     def __init__(self, id: int, initial_state: np.ndarray):
+        """
+        Initializes an Agent object.
+
+        Args:
+            id            (int)         : The unique identifier of the agent.
+            initial_state (np.ndarray)  : The initial state of the agent.
+        """
         self.id = id
         self.symbolic_state = ca.MX.sym(f'state_{id}', 2)
         self.state = initial_state
@@ -106,8 +145,23 @@ class Agent:
 
 class PredicateFunction :
     """
-    PredicateFunction definition class. This class is used to store the information about a predicate function. 
-    The class is used to store the predicate function and the contributing agents to the satisfaction of the predicate function.
+    Definition class for predicate functions. This class stores information about a predicate function, including its name, function itself, 
+    contributing agents, and an alternative function using the edge as input instead of the agents' state.
+
+    Attributes:
+            function_name        (srt)         : the name of the predicate function.
+            function             (ca.Function) : the predicate function itself.
+            function_edge        (ca.Function) : also the predicate function but it uses the edge as input instead of the state of the agents.
+            stateSpaceDimension  (int)         : the dimension of the state space. Default is 2 because it is used for omnidirectional robots.
+            computeApproximation (bool)        : if True, the class will create a hypercube approximation of the predicate function through optimization.
+            sourceNode           (int)         : the source node of the edge.
+            targetNode           (int)         : the target node of the edge.
+            center               (List[float]) : the center of the predicate function.
+            epsilon              (float)       : the threshold value used in predicate functions to determine the region of satisfaction.
+    
+    Note: 
+        The alternative function is used in the task decomposition.
+        When the function is set to None, the class will create a hypercube approximation of the predicate function through optimazation.
     """
     def __init__(self,
                  function_name: str,
@@ -120,12 +174,24 @@ class PredicateFunction :
                  center: List[float] = None,
                  epsilon: float = None) -> None:
         
+        """
+        Initializes a PredicateFunction object. Depending on which predicate function is used, the input arguments will de different. 
+
+        Args:
+            function_name        (srt)         : the name of the predicate function.
+            function             (ca.Function) : the predicate function itself.
+            function_edge        (ca.Function) : also the predicate function but it uses the edge as input instead of the state of the agents.
+            center               (List[float]) : the center of the predicate function.
+            epsilon              (float)       : the threshold value used in predicate functions to determine the region of satisfaction.
+        """
+    
         self._function_name = function_name
         self._function      = function
         self._function_edge = function_edge
         self._dim           = stateSpaceDimension
         self._epsilon       = epsilon if epsilon is not None else 1
         self._center        = center if center is not None else [0.0, 0.0]
+
 
         if self._function != None:
             self._isParametric = 0
@@ -161,58 +227,78 @@ class PredicateFunction :
            self._isApproximated = True
     
     @property
-    def function(self) :
+    def function(self) -> ca.Function:
+        """Get the predicate function."""
         return self._function
     @property
-    def function_name(self) :
+    def function_name(self) -> str:
+        """Get the name of the predicate function."""
         return self._function_name
     @property
-    def function_edge(self) :
+    def function_edge(self) -> ca.Function:
+        """Get the predicate function using the edge as input."""
         return self._function_edge
     @property
-    def contributing_agents(self):
+    def contributing_agents(self) -> List[UniqueIdentifier]:
+        """Get the IDs of contributing agents."""
         return self._contributing_agents
     @property
-    def epsilon(self):
+    def epsilon(self) -> float:
+        """Get the threshold value."""
         return self._epsilon
     @property
-    def center(self):
+    def center(self) -> List[float]:
+        """Get the center of the predicate function."""
         return self._center
     @property
-    def stateSpaceDimension(self) :
+    def stateSpaceDimension(self) -> int:
+        """Get the dimension of the state space."""
         return self._dim
     @property
-    def centerVar(self):
+    def centerVar(self) -> ca.MX:
+        """Get the center of the hypercube approximation."""
         return self._centerVar
     @property
-    def nuVar(self):
+    def nuVar(self) -> ca.MX:
+        """Get the nu vector of the hypercube approximation."""
         return self._nuVar
     @property
-    def sourceNode(self):
+    def sourceNode(self) -> int:
+        """Get the source node of the edge."""
         return self._sourceNode
     @property
-    def targetNode(self):
+    def targetNode(self) -> int:
+        """Get the target node of the edge."""
         return self._targetNode
     @property
-    def edgeTuple(self):
+    def edgeTuple(self) -> Tuple[int, int]:
+        """Get the edge tuple."""
         return self._edgeTuple
     @property
-    def hasUndefinedDirection(self):
+    def hasUndefinedDirection(self) -> bool:
+        """Check if the predicate has an undefined direction."""
         return ((self.sourceNode==None) or self.targetNode==None)
     @property
-    def isParametric(self):
+    def isParametric(self) -> bool:
+        """Check if the predicate is parametric or not."""
         return self._isParametric
     @property
-    def optimalApproximationCenter(self) :
+    def optimalApproximationCenter(self) -> ca.MX:
+        """Get the center of the optimal approximation."""
         return self._optimalApproximationCenter
     @property
-    def optimalApproximationNu(self) :
+    def optimalApproximationNu(self) -> ca.MX:
+        """Get the nu vector of the optimal approximation."""
         return self._optimalApproximationNu 
 
 
     def computeBestCuboidApproximation(self) :
-        """computes the best cuboid approximation of the predicate function.
-           In the future this might be approximated by some more complex zonotopes if needed
+        """
+        Computes the best cuboid approximation of the predicate function. In the future this might be approximated by some more complex zonotopes if needed.
+
+        Raises:
+            Exception: If an error occurs while computing the cuboid approximation.
+
         """
         opti = ca.Opti()
         
@@ -273,6 +359,21 @@ class PredicateFunction :
         
 
     def hypercubeVertices(self,source:int,target:int) :
+        """
+        This function is called to obtain the vertices of the hypercube approximation of the predicate function. The vertices are computed based on the center and nu vector of the hypercube.
+
+        Args:
+            source (int): The source node of the edge.
+            target (int): The target node of the edge.
+
+        Returns:
+            parametericHypercubeVertices : A matrix where each column represents one of the vertices of the hypercube.
+
+        Raises:
+            NotImplementedError: If the predicate has an undefined direction.
+            NotImplementedError: If the given source and target do not match the edge of the predicate.
+            NotImplementedError: If the formula is not parametric. 
+        """
         
         if self.hasUndefinedDirection :
             raise NotImplementedError("predicate has undefined direction. Only if you define a target and source you can obtain the hypercube vertices")
@@ -298,7 +399,22 @@ class PredicateFunction :
     
 
     def linearRepresentationHypercube(self,source:int,target:int) :
-        """returns linear representation of the parameteric function as Ax<=b"""
+        """
+        Returns linear representation of the parameteric function as Ax<=b. 
+        
+        Args:
+            source (int): The source node of the edge.
+            target (int): The target node of the edge.
+
+        Returns:
+            A : The matrix A of the linear representation.
+            b : The vector b of the linear representation.
+        
+        Raises:
+            NotImplementedError: If the predicate has an undefined direction or if the edge does not match the predicate.
+            NotImplementedError: If the given source and target do not match the edge of the predicate.
+            Exception: If the formula is not parametric and does not have an available linear approximation.
+        """
         if self.hasUndefinedDirection :
             raise NotImplementedError("predicate has undefined direction. Only if you define a target and source you can obtain the hypercube vertices")
         
@@ -346,18 +462,19 @@ class PredicateFunction :
     
 
 class BarrierFunction:
-    """class for convex barrier functions"""
+    """
+    This is a class for convex barrier functions. It stores information about the barrier function, the associated alpha function, the switch function, and the time function."""
+    
     def __init__(self,
                  function: ca.Function,
                  associated_alpha_function:ca.Function = None,
                  time_function:ca.Function = None,
                  switch_function:ca.Function = None,
                  name :str = None) -> None:
-        
         """
         The initialization for a barrier function is a function b("state_1","state_2",...., "time")-> ["value].
-        This type of structure it is checked within the class itself. The associated alpha funnction is is a scalar functon that can be used to 
-        construct a barrie constraint in the form \dot{b}("state_1","state_2",...., "time") <= alpha("time")
+        This type of structure it is checked within the class itself. The associated alpha function is is a scalar functon that can be used to 
+        construct a barrier constraint in the form \dot{b}("state_1","state_2",...., "time") <= alpha("time")
         
         Args : 
             function                  (ca.Function) : the barrier function
@@ -368,13 +485,15 @@ class BarrierFunction:
         >>> b = ca.Function("b",[state1,state2,time],[ca.log(1+ca.exp(-state1)) + ca.log(1+ca.exp(-state2))],["state_1","state_2","time"],["value"])
         >>> alpha = ca.Function("alpha",[dummy_scalar],[2*dummy_scalar])
         >>> barrier = BarrierFunction(b,alpha)
-        
-        """
 
+        Raises:
+            TypeError: If the function is not a CasADi Function.
+        """
+    
         if not isinstance(function, ca.Function):
             raise TypeError("function must be a casadi.MX object") 
         
-        check_barrier_function_IO_names(function) # will thraw an exception if the wrong naming in input and output is given
+        check_barrier_function_IO_names(function) # will throw an exception if the wrong naming in input and output is given
 
         self._function :ca.Function = function
         self._switch_function       = switch_function
@@ -393,39 +512,63 @@ class BarrierFunction:
         if name == None :
             self._name = self._function.name()
     
+
     @property
-    def function(self) :
+    def function(self):
+        """Get the barrier function."""
         return self._function
     @property
     def name(self):
+        """Get the name of the barrier function."""
         return self._name
     @property
     def associated_alpha_function(self):
+        """Get the associated alpha function."""
         return self._associated_alpha_function
     @property
     def partial_time_derivative(self):
+        """Get the partial derivative with respect to time."""
         return self._partial_time_derivative 
     @property
     def contributing_agents(self):
+        """Get the IDs of contributing agents."""
         return self._contributing_agents
     @property
     def switch_function(self):
+        """Get the switch function."""
         return self._switch_function
     @property
     def time_function(self):
+        """Get the function of time."""
         return self._time_function
     
 
     def gradient_function_wrt_state_of_agent(self,agent_id) -> ca.Function:
+        """
+        Get the gradient function with respect to the state of a given agent.
+
+        Args:
+            agent_id (int): The ID of the agent.
+
+        Returns:
+            self._gradient_function_wrt (dict[UniqueIdentifier,ca.Function]): The gradient function with respect to the given agent.
+        
+        Raises:
+            KeyError: If the gradient function for the specified agent is not stored.
+        """
         try :
             return self._gradient_function_wrt[agent_id]
         except KeyError :
             raise KeyError("The gradient function with respect to agent " + str(agent_id) + " is not stored in this barrier function")
     
+
     # this function is applicable to general barriers
     def _compute_local_gradient_functions(self) -> None:
-        """store the local gradient of the barrier function with respect to the given agent id. The stored gradienjt function takes as input the same names the barrier function"""
-        
+        """
+        Store the local gradient of the barrier function with respect to the given agent id. 
+        The stored gradient function takes as input the same names the barrier function
+        """
+
         named_inputs : dict[str,ca.MX]  = {} # will contain the named inputs to the function
         input_names  : list[str]        = self._function.name_in()
 
@@ -449,7 +592,17 @@ class BarrierFunction:
     
     
     def check_that_is_scalar_function(self,function:Optional[ca.Function]) -> None :
-        
+        """
+        Check if the given function is a valid scalar function.
+
+        Args:
+            function (ca.Function): The function to check.
+
+        Raises:
+            TypeError: If the function is not a CasADi Function.
+            ValueError: If the function is not a scalar function of one variable.
+        """
+
         if function == None :
             pass
         else: 
@@ -462,11 +615,28 @@ class BarrierFunction:
 
 
 class TimeInterval :
-    """time interval class"""
-    _time_step = 1 # time step is used to switch time time to sampling instants
-    # empty set is represented by a double a=None b = None
+    """
+    A class that represents a time interval with a start and end time.
+
+    Attributes:
+        _time_step: An integer that defines the time step used to switch time to sampling instants.
+        Empty set is represented by a double a=None b = None.
+    """
+    _time_step = 1 
+
     def __init__(self, a: Union[float, int] = None, b: Union[float, int] = None) -> None:
         
+        """
+        Initializes a TimeInterval with a start time (a) and end time (b). If both a and b are None, the TimeInterval represents an empty set.
+
+        Args:
+            a: The start time of the interval. Must be a non-negative float or int.
+            b: The end time of the interval. Must be a non-negative float or int and must be greater than or equal to a.
+
+        Raises:
+            ValueError: If a or b is not a non-negative float or int, or if b is less than a.
+        """
+
         if any([a==None,b==None]) and (not all(([a==None,b==None]))) :
             raise ValueError("only empty set is allowed to have None Values in the interval")
         elif  any([a==None,b==None]) and (all(([a==None,b==None]))) : # empty set
@@ -495,26 +665,32 @@ class TimeInterval :
         
     @property
     def a(self):
+        """Return the start time of the interval."""
         return self._a
     @property
     def b(self):
+        """Return the end time of the interval."""
         return self._b
     @property
-    def period(self) :
-        if self.is_empty() :
+    def period(self):
+        """Return the length of the time interval."""
+        if self.is_empty():
             return None # empty set has measure None
         return self._b - self._a
     @property
-    def aslist(self) :
+    def aslist(self):
+        """Return the time interval as a list."""
         return [self._a,self._b]
     
     def is_empty(self) -> bool:
+        """Check if the time interval is empty."""
         if self.a is None and self.b is None:
             return True
         else:
             return False
         
     def is_singular(self) -> bool:
+        """Check if the time interval is singular."""
         a, b = self.a, self.b
         if a == b:
             return True
@@ -598,26 +774,39 @@ class TimeInterval :
 
 
 class TemporalOperator(ABC):
+    """This is an abstract class for temporal operators. It is used to store the information about the temporal operators."""
     
     @property
     @abstractmethod
     def time_of_satisfaction(self) -> float:
+        """The time when the formula is satisfied."""
         pass
     @property
     @abstractmethod
     def time_of_remotion(self) -> float:
+        """The time when the formula is removed."""
         pass
     @property
     @abstractmethod
-    def time_interval(self) -> TimeInterval:
-        pass
+    def time_interval(self) -> 'TimeInterval':
+        """The time interval in which the formula is satisfied."""
+        pass  
     @property
     @abstractmethod
     def temporal_type(self) -> str:
+        """The type of temporal operator."""
         pass
 
-
 class AlwaysOperator(TemporalOperator):
+    """
+    Stores information about the Always operator.
+
+    Attributes:
+        _time_interval        (TimeInterval) : The time interval in which the formula is satisfied.
+        _time_of_satisfaction (float)        : The time when the formula is satisfied.
+        _time_of_remotion     (float)        : The time when the formula is removed.
+        _temporal_type        (str)          : The type of temporal operator.
+    """
     def __init__(self,time_interval:TimeInterval, temporal_type: str = "AlwaysOperator") -> None:
 
         self._time_interval         : TimeInterval = time_interval
@@ -625,22 +814,55 @@ class AlwaysOperator(TemporalOperator):
         self._time_of_remotion      : float        = self._time_interval.b
         self._temporal_type         : str          = temporal_type
     
+        """
+        Initializes an AlwaysOperator object with the provided time interval.
+
+        Args:
+            time_interval (TimeInterval) : The time interval in which the formula is satisfied.
+            temporal_type (str)          : The type of temporal operator.
+        """
+
     @property
     def time_of_satisfaction(self) -> float:
+        """The time when the formula is satisfied."""
         return self._time_of_satisfaction
     @property
     def time_of_remotion(self) -> float:
+        """The time when the formula is removed."""
         return self._time_of_remotion
     @property
     def time_interval(self) -> TimeInterval:
+        """The time interval in which the formula is satisfied."""
         return self._time_interval  
     @property
     def temporal_type(self) -> str:
+        """The type of temporal operator."""
         return self._temporal_type
     
     
 class EventuallyOperator(TemporalOperator):
+    """
+    Stores information about the Eventually operator.
+
+    Attributes:
+        _time_interval        (TimeInterval) : The time interval in which the formula is satisfied.
+        _time_of_satisfaction (float)        : The time when the formula is satisfied.
+        _time_of_remotion     (float)        : The time when the formula is removed.
+        _temporal_type        (str)          : The type of temporal operator.
+    """
+
     def __init__(self,time_interval:TimeInterval,time_of_satisfaction:float=None, temporal_type: str = "EventuallyOperator") -> None:
+        """
+        Initializes an EventuallyOperator object.
+
+        Args:
+            time_interval        (TimeInterval)    : The time interval in which the formula is satisfied.
+            time_of_satisfaction (float, optional) : The time when the formula is satisfied. If not provided, it will be randomly generated within the time interval.
+            temporal_type        (str)             : The type of temporal operator.
+
+        Raises:
+            ValueError: If the specified time of satisfaction is outside the time interval.
+        """
 
         self._time_interval       : TimeInterval = time_interval
         self._time_of_satisfaction: float        = time_of_satisfaction
@@ -655,75 +877,113 @@ class EventuallyOperator(TemporalOperator):
         
     @property
     def time_of_satisfaction(self) -> float:
+        """The time when the formula is satisfied."""
         return self._time_of_satisfaction
     @property
     def time_of_remotion(self) -> float:
+        """The time when the formula is removed."""
         return self._time_of_remotion
     @property
     def time_interval(self) -> TimeInterval:
-        return self._time_interval    
+        """The time interval in which the formula is satisfied."""
+        return self._time_interval  
     @property
     def temporal_type(self) -> str:
+        """The type of temporal operator."""
         return self._temporal_type
 
 
 @dataclass(unsafe_hash=True)
-class StlTask :
-    def __init__(self,predicate: PredicateFunction = None, temporal_operator: TemporalOperator = None) -> None:
+class StlTask:
+    """
+    This class is used to store information about an STL task. It contains the predicate function and the temporal operator.
+
+    Attributes:
+        _predicate              (PredicateFunction) : The predicate function.
+        _temporal_operator      (TemporalOperator)  : The temporal operator.
+
+    Note:
+        If the predicate is not provided then it will be set to None and will become parametric. 
+
+    """
+    def __init__(self, predicate: PredicateFunction = None, temporal_operator: TemporalOperator = None) -> None:
          
         self._predicate              = predicate         if predicate is not None else PredicateFunction
         self._temporal_operator      = temporal_operator if temporal_operator is not None else TemporalOperator
 
+        """
+        Initializes an STL task with the provided predicate function and temporal operator.
+
+        Args:
+            predicate         (PredicateFunction) : The predicate function.
+            temporal_operator (TemporalOperator)  : The temporal operator.
+        """
+
     
     @property
-    def predicate(self):
+    def predicate(self) -> PredicateFunction:
+        """Get the predicate."""
         return self._predicate
     @property
-    def type(self):
+    def type(self) -> str:
+        """Get the type of predicate function."""
         return self._predicate.function_name
     @property
-    def epsilon(self):
+    def epsilon(self) -> float:
+        """Get the threshold value."""
         return self._predicate.epsilon
     @property
-    def center(self):
+    def center(self) -> List[float]:
+        """Get the center of the predicate function."""
         return self._predicate.center
     @property
-    def temporal_operator(self):
+    def temporal_operator(self) -> TemporalOperator:
+        """Get the temporal operator."""
         return self._temporal_operator
     @property
-    def temporal_type(self):
+    def temporal_type(self) -> str:
+        """Get the type of temporal operator."""
         return self._temporal_operator.temporal_type
     @property
-    def time_interval(self):
+    def time_interval(self) -> TimeInterval:
+        """Get the time interval of the temporal operator."""
         return self._temporal_operator.time_interval
     @property
-    def predicate_function(self):
+    def predicate_function(self) -> ca.Function:
+        """Get the predicate function."""
         return self._predicate.function
     @property
-    def isParametric(self):
+    def isParametric(self) -> bool:
+        """Check if the predicate is parametric or not."""
         return self._predicate.isParametric
     @property
-    def contributing_agents(self):
+    def contributing_agents(self) -> List[int]:
+        """Get the IDs of contributing agents."""
         return self._predicate.contributing_agents
     @property
-    def centerVar(self):
+    def centerVar(self) -> ca.MX:
+        """Get the center variable."""
         return self._predicate.centerVar
     @property
-    def nuVar(self):
+    def nuVar(self) -> ca.MX:
+        """Get the nu variable."""
         return self._predicate.nuVar
     @property
-    def sourceNode(self):
+    def sourceNode(self) -> int:
+        """Get the source node."""
         return self._predicate.contributing_agents[0]
     @property
-    def targetNode(self):
+    def targetNode(self) -> int:
+        """Get the target node."""
         return self._predicate.contributing_agents[1]
     @property
-    def edgeTuple(self):
+    def edgeTuple(self) -> Tuple[int,int]:
+        """Get the edge tuple."""
         return self._predicate.edgeTuple
     
 
     def getHypercubeVertices(self,sourceNode,targetNode:int) -> List[ca.MX]:
-        """ computes vertices of hypercube as function of the centerVar and the dimension vector nuVar"""
+        """Computes vertices of hypercube as function of the centerVar and the dimension vector nuVar"""
         return self.predicate.hypercubeVertices(source=sourceNode,target=targetNode)
     
     def computeLinearHypercubeRepresentation(self,sourceNode:int,targetNode:int) -> Tuple[ca.MX,ca.MX] :
@@ -732,7 +992,21 @@ class StlTask :
         return A,b
     
     def getConstraintFromInclusionOf(self,formula : 'StlTask') -> List[ca.MX]:
-        """ returns inclusion constraints for "formula" inside the of the self formula instance """
+        """
+        Returns inclusion constraints for "formula" inside the of the self formula instance.
+
+        Args:
+            formula (StlTask): The formula to include.
+
+        Returns:
+            constraints (List[ca.MX]): The inclusion constraints.
+
+        Raises:
+            ValueError: If the input formula is not an instance of the STL formula.
+            NotImplementedError: If the formula you are trying to include is not part of the same edge as the current formula.
+            NotImplementedError: If the formula you are trying to include is not parametric and the current formula is parametric.
+
+        """
         if not isinstance(formula,StlTask) :
             raise ValueError("input formula must be an instance of STL formula")
         # two cases :
@@ -769,12 +1043,28 @@ class StlTask :
                     constraints +=[ self._predicate.function_edge(vertices[:,jj])<=0 ] 
                 
         elif (not formula.isParametric) and self.isParametric :  
-            raise NotImplementedError("Trying to include a non parameteric formula inside a parameteroc one. Not supported")
+            raise NotImplementedError("Trying to include a non parameteric formula inside a parameteric one. Not supported")
         
         return constraints
     
 
-def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, agent:Agent) ->PredicateFunction:
+def go_to_goal_predicate_2d(goal:np.ndarray,epsilon :float, agent:Agent) -> PredicateFunction:
+
+    """
+    Helper function to create a go-to-goal predicate in the form ||position-goal|| <= epsilon.
+    This predicate is useful to make an agent go to a certain goal position.
+
+    Args:
+        goal    (np.ndarray) : the coordinates of the goal position
+        epsilon (float)      : the closeness value
+        agent   (Agent)      : the agent that will go to the goal position
+
+    Returns:
+        PredicateFunction (PredicateFunction) : the predicate function
+
+    Raises:
+        ValueError: If the agent and goal have different position dimensions.
+    """
 
     array_to_list = goal.tolist()  # Convert NumPy array to Python list
     goal_list     = [float(x) for x in array_to_list]  # Convert elements to integers
@@ -807,12 +1097,15 @@ def epsilon_position_closeness_predicate(epsilon:float, agent_i:Agent, agent_j:A
     This predicate is useful to dictate some closeness relation among two agents for example.
     
     Args:
-        epsilon  : the closeness value
-        agent_i : the first agent
-        agent_j : the second agent
+        epsilon  (float) : the closeness value
+        agent_i  (Agent) : the first agent
+        agent_j  (Agent) : the second agent
     
     Returns:
-        PredicateFunction : the predicate function 
+        PredicateFunction (PredicateFunction) : the predicate function
+    
+    Raises:
+        ValueError: If the two dynamical models have different position dimensions.
     """
 
     if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
@@ -833,7 +1126,22 @@ def epsilon_position_closeness_predicate(epsilon:float, agent_i:Agent, agent_j:A
     return PredicateFunction(function_name="epsilon_position_closeness_predicate", function=predicate, function_edge=predicate_edge, epsilon=epsilon)
 
 
-def collision_avoidance_predicate(epsilon:float, agent_i:Agent, agent_j:Agent) ->PredicateFunction: # Does not need to be called state_1 and state_2
+def collision_avoidance_predicate(epsilon:float, agent_i:Agent, agent_j:Agent) ->PredicateFunction: 
+    """
+    Helper function to create a collision avoidance predicate in the form ||position1-position2|| <= epsilon.
+    This predicate is useful th make sure that two agents do not collide.
+
+    Args:
+        epsilon  (float) : the closeness value
+        agent_i  (Agent) : the first agent
+        agent_j  (Agent) : the second agent
+
+    Returns:
+        PredicateFunction (PredicateFunction) : the predicate function
+    
+    Raises:
+        ValueError: If the two dynamical models have different position dimensions.
+    """
 
 
     if agent_i.symbolic_state.shape != agent_j.symbolic_state.shape:
@@ -857,15 +1165,20 @@ def collision_avoidance_predicate(epsilon:float, agent_i:Agent, agent_j:Agent) -
 def formation_predicate(epsilon:float, agent_i:Agent, agent_j:Agent, relative_pos:np.ndarray, direction_i_to_j:bool=True) ->PredicateFunction:
     """
     Helper function to create a closeness relation predicate witha  certain relative position vector. in the form ||position1-position2|| <= epsilon.
-    This predicate is useful to dictate some closeness relation among two agents for example. 
+    This predicate is useful if you want to dictate a certain formation among two agents.
     
     Args:
-        epsilon  : the closeness value
-        model_agent_i : the first agent
-        model_agent_j : the second agent
+        epsilon          (float)      : the closeness value
+        agent_i          (Agent)      : the first agent
+        agent_j          (Agent)      : the second agent
+        relative_pos     (np.ndarray) : the relative position vector
     
     Returns:
-        PredicateFunction : the predicate function 
+        PredicateFunction (PredicateFunction) : the predicate function
+    
+    Raises:
+        ValueError: If the two dynamical models have different position dimensions.
+        ValueError: If the relative position vector has a different dimension than the agents' positions.
     """
     array_to_list     = relative_pos.tolist()  # Convert NumPy array to Python list
     relative_pos_list = [float(x) for x in array_to_list]  # Convert elements to integers
@@ -899,10 +1212,15 @@ def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha
     Function to compute the conjunction of barrier functions. The function takes a variable number of barrier functions as input and returns a new barrier function that is the conjunction of the input barrier functions.
     
     Args:
-        List[BarrierFunction]: Variable number of barrier functions.
+        barrier_list (List[BarrierFunction]) : The list of barrier functions to be conjuncted.
+        associated_alpha_function (ca.Function) : The associated alpha function to be used for barrier constraint construction.
     
     Returns:
-        BarrierFunction: The barrier function representing the conjunction of the input barrier functions.
+        BarrierFunction (BarrierFunction) : The barrier function representing the conjunction of the input barrier functions.
+
+    Raises:
+        TypeError: If the input arguments are not BarrierFunction objects.
+        ValueError: If the associated alpha function is not a casadi scalar function of one variable.
         
     Example :
     >>> b1 = BarrierFunction(...)
@@ -974,7 +1292,7 @@ def conjunction_of_barriers(barrier_list:List[BarrierFunction], associated_alpha
     
     b = ca.Function("conjunction_barrier",list(inputs.values()),[conjunction_barrier],list(inputs.keys()),["value"]) # Now we can have conjunctions of formulas
     
-    return BarrierFunction(function=b,associated_alpha_function=associated_alpha_function,switch_function=final_switch)
+    return BarrierFunction(function=b, associated_alpha_function=associated_alpha_function, switch_function=final_switch)
 
 
 def create_barrier_from_task(task:StlTask, initial_conditions:List[Agent], alpha_function:ca.Function = None, t_init:float = 0) -> BarrierFunction:
@@ -983,14 +1301,18 @@ def create_barrier_from_task(task:StlTask, initial_conditions:List[Agent], alpha
     where mu(x) is the predicate and gamma(t) is a suitably defined time function 
     
     Args:
-        task (StlTask)                            : the task for which the barrier function is to be created
-        initial_conditions (List[Agent])          : the initial conditions of the agents
-        alpha_function (ca.Function)              : the associated alpha function to be used for barrier constraint construction
-        t_init (float)                            : the initial time of the barrier function in terms of the time to which the barrier should start
+        task               (StlTask)     : the task for which the barrier function is to be created
+        initial_conditions (List[Agent]) : the initial conditions of the agents
+        alpha_function     (ca.Function) : the associated alpha function to be used for barrier constraint construction
+        t_init             (float)       : the initial time of the barrier function in terms of the time to which the barrier should start
         
-    return :
-        BarrierFunction : the barrier function associated with the given task
-    
+    Returns:
+         (BarrierFunction) : the barrier function associated with the given task
+
+    Raises:
+        ValueError: If the initial conditions for the contributing agents are not complete.
+        ValueError: If the initial condition for an agent has a different size than the state of the agent.
+        ValueError: If the time of satisfaction of the task is less than the initial time of the barrier.
     """
     # get task specifics
     contributing_agents  = task.contributing_agents # list of contributing agents. In the case of this controller this is always going to be 2 agents : the self agent and another agent

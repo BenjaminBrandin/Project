@@ -14,18 +14,32 @@ from builders import (Agent, StlTask, TimeInterval, AlwaysOperator, EventuallyOp
 
 class Manager():
 
+    """
+    Manages the creation of task and communication graphs and performs task decomposition on non-communicative edges.
+    
+    This class reads initial states and tasks from YAML files.
+
+    Attributes:
+        agents             (dict[int, Agent])      : Dictionary of agents.
+        total_tasks        (int)                   : Total number of tasks.
+        start_pos          (dict[int, np.ndarray]) : Initial positions loaded from YAML file.
+        tasks              (dict[str, dict])       : Tasks loaded from YAML file.
+        task_pub           (rospy.Publisher)       : Publisher for tasks.
+        numOfTasks_pub     (rospy.Publisher)       : Publisher for the number of tasks.
+        comm_graph         (networkx.Graph)        : Communication graph.
+        task_graph         (networkx.Graph)        : Task graph.
+        initial_task_graph (networkx.Graph)        : Initial task graph.
+
+    """
+
     def __init__(self):
+        """Initializes a Manager object."""
 
         rospy.init_node('manager')
 
-        # Parameters
-        self.barriers = []
-        self.sub_tasks: list[StlTask]= []
-        self.agents = {}
-        self.scale_factor = 3
-        self.total_tasks = 0
+        self.agents: dict[int, Agent] = {}
+        self.total_tasks: int = 0
 
-        
         # setup publishers
         self.task_pub = rospy.Publisher("tasks", task_msg, queue_size=10)
         self.numOfTasks_pub = rospy.Publisher("numOfTasks", Int32, queue_size=10)
@@ -64,6 +78,7 @@ class Manager():
 
 
     def update_graph(self):
+        """Adds the tasks to the edges of the task graph."""
         for task_info in self.tasks.values():
             # Create the task
             task = self.create_task(task_info)
@@ -72,6 +87,18 @@ class Manager():
 
 
     def create_task(self, task_info) -> StlTask:
+        """
+        Creates a task based on the task information from the YAML file.
+        
+        Args:
+            task_info (dict) : Task information from the YAML file.
+
+        Returns:
+            task (StlTask) : Task object.
+
+        Raises:
+            Exception : If the task type is not supported.
+        """
         # Create the predicate based on the type of the task
         if task_info["TYPE"] == "go_to_goal_predicate_2d":
             predicate = go_to_goal_predicate_2d(goal=np.array(task_info["CENTER"]), epsilon=task_info["EPSILON"], 
@@ -100,6 +127,7 @@ class Manager():
 
 
     def plot_graph(self):
+        """Plots the communication graph, initial task graph, and decomposed task graph."""
         fig, ax = plt.subplots(3, 1)
         self.draw_graph(ax[0], self.comm_graph, "Communication Graph")
         self.draw_graph(ax[1], self.initial_task_graph, "Initial Task Graph")
@@ -107,11 +135,13 @@ class Manager():
         plt.show()
 
     def draw_graph(self, ax, graph, title):
+        """Draws the graph."""
         nx.draw(graph, with_labels=True, font_weight='bold', ax=ax)
         ax.set_title(title)
 
 
     def print_tasks(self):
+        """Prints the tasks of the task graph."""
         for i,j,attr in self.task_graph.edges(data=True):
             tasks = attr["container"].task_list
             for task in tasks:
@@ -130,6 +160,7 @@ class Manager():
         
 
     def publish_tasks(self):
+        """Publishes the tasks to the task_pub."""
         tasks: list[StlTask] = []
         for i,j,attr in self.task_graph.edges(data=True):
             tasks = attr["container"].task_list
@@ -149,6 +180,7 @@ class Manager():
                 rospy.sleep(0.5)
 
     def publish_numOfTask(self):
+        """Publishes the number of tasks to the numOfTasks_pub."""
         flag = Int32()
         flag.data = self.total_tasks
         self.numOfTasks_pub.publish(flag)

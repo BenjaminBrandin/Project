@@ -18,6 +18,11 @@ from builders import (BarrierFunction, Agent, StlTask, TimeInterval, AlwaysOpera
 
 
 class Controller():
+    """
+    This class is responsible for solving the optimization problem and publishing the velocity commands to the agents. It is build for omnidirectional robots and does not take into account the orientation of the robots.
+    """
+
+
     def __init__(self):
         # Initialize the node
         rospy.init_node('controller')
