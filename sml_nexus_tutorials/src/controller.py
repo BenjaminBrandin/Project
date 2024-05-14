@@ -19,9 +19,42 @@ from builders import (BarrierFunction, Agent, StlTask, TimeInterval, AlwaysOpera
 
 class Controller():
     """
-    This class is responsible for solving the optimization problem and publishing the velocity commands to the agents. It is build for omnidirectional robots and does not take into account the orientation of the robots.
-    """
+    This class is a STL-QP (Signal Temporal Logic-Quadratic Programming) controller for omnidirectional robots and therefore does not consider the orientation of the robots.
+    It is responsible for solving the optimization problem and publishing the velocity commands to the agents. 
+    
 
+    Attributes:
+        solver                 (ca.Opti)                  : An optimization problem solver instance used for solving the STL-QP optimization problem.
+        parameters             (ca_tools.struct_symMX)    : A structure containing parameters necessary for the optimization problem.
+        input_vector           (ca.MX)                    : A symbolic variable representing the input vector for the optimization problem.
+        slack_variables        (dict)                     : A dictionary containing slack variables used to enforce barrier constraints in the optimization problem.
+        scale_factor           (int)                      : A scaling factor applied to the optimization problem to adjust the cost function.
+        dummy_scalar           (ca.MX)                    : A dummy scalar symbolic variable used in the optimization problem.
+        alpha_fun              (ca.Function)              : A CasADi function representing the scaling factor applied to the dummy scalar in the optimization problem.
+        nabla_funs             (list)                     : A list of functions representing the gradients of barrier functions in the optimization problem.
+        nabla_inputs           (list)                     : A list of inputs required for evaluating the gradient functions.
+        agent_pose             (PoseStamped)              : The current pose of the agent.
+        agent_name             (str)                      : The name of the agent.
+        agent_id               (int)                      : The ID of the agent.
+        last_pose_time         (rospy.Time)               : The timestamp of the last received agent pose.
+        agents                 (dict)                     : A dictionary containing all agents and their states.
+        total_agents           (int)                      : The total number of agents in the environment.
+        barriers               (list)                     : A list of barrier functions used to construct the constraints of the optimization problem.
+        task                   (task_msg)                 : The message that contains the task information.
+        task_msg_list          (list)                     : A list of task messages.
+        total_tasks            (float)                    : The total number of tasks that was sent by the manager.
+        max_velocity           (int)                      : The maximum velocity of the agent used to limit the velocity command.
+        vel_cmd_msg            (Twist)                    : The velocity command message to be published to the cmd_vel topic.
+        vel_pub                (rospy.Publisher)          : A publisher for sending velocity commands.
+        agent_pose_pub         (rospy.Publisher)          : A publisher for publishing the agent's pose.
+        tf_buffer              (tf2_ros.Buffer)           : A buffer for storing transforms.
+        tf_listener            (tf2_ros.TransformListener): A listener for receiving transforms.
+
+    Note:
+        The controller subscribes to several topics to receive updates about tasks, agent poses, and the number of tasks.
+        It also publishes the velocity command and the agent's pose.
+        The controller waits until it receives all task messages before creating the tasks and barriers and starting the control loop.
+    """
 
     def __init__(self):
         # Initialize the node
@@ -83,12 +116,21 @@ class Controller():
             rospy.sleep(1)
 
         # Create the tasks and the barriers
-        self.barriers = self.create_task(self.task_msg_list)
+        self.barriers = self.create_barriers(self.task_msg_list)
         self.solver = self.get_qpsolver_and_parameter_structure()
         self.control_loop()
 
 
     def conjunction_on_same_edge(self, barriers:List[BarrierFunction]) -> List[BarrierFunction]:
+        """
+        Loop through the barriers and create the conjunction of the barriers on the same edge.
+
+        Args:
+            barriers (List[BarrierFunction]): List of all the created barriers.
+
+        Returns:
+            new_barriers (List[BarrierFunction]): List of the new barriers created by the conjunction of the barriers on the same edge.
+        """
         barriers_dict: defaultdict = defaultdict(list)
 
         # create the conjunction of the barriers on the same edge
@@ -104,9 +146,31 @@ class Controller():
         return new_barriers
 
 
-    def create_task(self, messages:List[task_msg]) -> List[BarrierFunction]:
-        barriers_list = []
+    def create_barriers(self, messages:List[task_msg]) -> List[BarrierFunction]:
+        """
+        Constructs the barriers from the subscribed task messages.     
+        
+        Args:
+            messages (List[task_msg]): List of task messages.
+        
+        Returns:
+            barriers_list (List[BarrierFunction]): List of the created barriers.
+        
+        Raises:
+            Exception: If the task type is not supported.  
 
+        Note:
+            The form of the task message is defined in the custom_msg package and looks like this:
+            int32[] edge
+            string type
+            float32[] center
+            float32 epsilon
+            string temp_op
+            int32[] interval
+            int32[] involved_agents
+            bool communicate  
+        """
+        barriers_list = []
         for message in messages:
             # Create the predicate based on the type of the task
             if message.type == "go_to_goal_predicate_2d":
@@ -143,7 +207,20 @@ class Controller():
         return barriers_list
 
 
-    def get_qpsolver_and_parameter_structure(self):
+    def get_qpsolver_and_parameter_structure(self) -> ca.qpsol:
+        """
+        Initializes the parameter structure that contains the state of the agents and the time. 
+        This function creates all that is necessary for the optimization problem and creates the optimization solver.
+
+        Returns:
+            solver (ca.qpsol): The optimization solver.
+
+        Note:
+            The cost function is a quadratic function of the input vector and the slack variables where the slack variables are used to enforce the barrier constraints.
+            The slack variables are multiplied by a factor of 1000 for the leading agent and 10 for the other agents in an attempt to prioritize self-tasks.
+        
+        """
+
         # Create the parameter structure for the optimization problem --- 'p' ---
         parameter_list  = []
         parameter_list += [ca_tools.entry(f"state_{id}", shape=2) for id in self.agents.keys()]
@@ -176,6 +253,16 @@ class Controller():
 
 
     def generate_barrier_constraints(self, barrier_list:List[BarrierFunction]) -> ca.MX:
+        """
+        Iterates through the barrier list and generates the constraints for each barrier by calculating the gradient of the barrier function.
+        It also creates the slack variables for the constraints.
+
+        Args:
+            barrier_list (List[BarrierFunction]): List of the conjuncted barriers.
+
+        Returns:
+            constraints (ca.MX): The constraints for the optimization problem.
+        """
         constraints = []
         for barrier in barrier_list:
             # Check the barrier for leading agent
@@ -220,8 +307,9 @@ class Controller():
 
 
     def control_loop(self):
+        """This is the main control loop of the controller. It calculates the optimal input and publishes the velocity command to the cmd_vel topic."""
+        
         r = rospy.Rate(50)
-
         while not rospy.is_shutdown():
             
             # Fill the structure with the current values
@@ -262,23 +350,65 @@ class Controller():
 
     # ----------- Callbacks -----------------
     def pose_callback(self, msg):
+        """
+        Callback function for the agent's pose.
+
+        Args:
+            msg (PoseStamped): The pose message of the agent.
+
+        Note:
+            This function is used to get the agent pose from the qualisys system and publish it to the agent_pose topic for easy access.
+         
+        """
         self.agent_pose = msg
         self.agent_pose_pub.publish(self.agent_pose)
 
     def other_agent_pose_callback(self, msg):
+        """
+        Callback function to store all the agents' poses.
+        
+        Args:
+            msg (PoseStamped): The pose message of the other agents.
+
+        Note:
+            The way I am extracting the agent id is dependent on the topic name and needs to be adjusted if the topic name changes.
+        
+        """
         agent_id              = int(msg._connection_header['topic'].split('/')[-2].replace('nexus', ''))
         state                 = np.array([msg.pose.position.x, msg.pose.position.y])
         self.agents[agent_id] = Agent(id=agent_id, initial_state=state)
         self.last_pose_time   = rospy.Time.now() 
 
     def numOfTasks_callback(self, msg):
+        """
+        Callback function for the total number of tasks and is used as a flag to wait for all tasks to be received.
+        
+        Args:
+            msg (Int32): The total number of tasks.
+        """
         self.total_tasks = msg.data
 
     def task_callback(self, msg):
+        """
+        Callback function for the task messages.
+        
+        Args:
+            msg (task_msg): The task message.
+        """
         self.task_msg_list.append(msg)
 
 
-def transform_twist(twist=Twist, transform_stamped=TransformStamped):
+def transform_twist(twist=Twist, transform_stamped=TransformStamped) -> Twist:
+    """
+    Transforms the twist from one frame to another frame.
+    
+    Args:
+        twist             (Twist)            : The cmd_vel message to be transformed.
+        transform_stamped (TransformStamped) : The transform between the frames.
+
+    Returns:
+        new_twist (Twist) : The transformed cmd_vel message.
+    """
     transform_stamped_ = copy.deepcopy(transform_stamped)
     # Inverse real-part of quaternion to inverse rotation
     transform_stamped_.transform.rotation.w = - transform_stamped_.transform.rotation.w

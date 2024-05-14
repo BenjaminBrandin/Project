@@ -98,6 +98,17 @@ class Manager():
 
         Raises:
             Exception : If the task type is not supported.
+
+        Note:
+            The form of the task message is defined in the custom_msg package and looks like this:
+            int32[] edge
+            string type
+            float32[] center
+            float32 epsilon
+            string temp_op
+            int32[] interval
+            int32[] involved_agents
+            bool communicate 
         """
         # Create the predicate based on the type of the task
         if task_info["TYPE"] == "go_to_goal_predicate_2d":

@@ -1,3 +1,27 @@
+"""
+MIT License
+
+Copyright (c) [2024] [Gregorio Marchesini]
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+
 import itertools
 import numpy as np
 import casadi as ca
@@ -7,7 +31,19 @@ from graph_module import EdgeTaskContainer
 from builders import StlTask, TimeInterval, PredicateFunction, globalOptimizer
 
 
-def allNonParametric(listOfFormulas : List[StlTask]) -> bool :
+def allNonParametric(listOfFormulas : List[StlTask]) -> bool:
+    """
+    Check if all formulas are non-parametric.
+    
+    Args:
+        listOfFormulas (list[StlTask]) : list of formulas to be considered
+    
+    Returns:
+        bool : True if all formulas are non-parametric, False otherwise
+
+    Raises:
+        ValueError : If the list of formulas is empty.
+    """
     
     if len(listOfFormulas) == 0 :
         raise ValueError("Empty list not accepted")
@@ -16,7 +52,19 @@ def allNonParametric(listOfFormulas : List[StlTask]) -> bool :
             return False
     return True 
 
-def allParametric(listOfFormulas : List[StlTask]) -> bool :
+def allParametric(listOfFormulas : List[StlTask]) -> bool:
+    """
+    Check if all formulas are parametric.
+    
+    Args:
+        listOfFormulas (list[StlTask]) : list of formulas to be considered
+    
+    Returns:
+        bool : True if all formulas are parametric, False otherwise
+
+    Raises:
+        ValueError : If the list of formulas is empty.
+    """
     
     if len(listOfFormulas) == 0 :
         raise ValueError("Empty list not accepted")
@@ -25,8 +73,19 @@ def allParametric(listOfFormulas : List[StlTask]) -> bool :
             return False
     return True
 
-def isThereMultipleIntersection(formulasList : List[StlTask]) -> bool :
-    """check if one always has more than one intersection with other always operators"""
+def isThereMultipleIntersection(formulasList : List[StlTask]) -> bool:
+    """
+    Check if one always has more than one intersection with other always operators.
+    
+    Args:
+        formulasList (list[StlTask]) : list of formulas to be considered.
+
+    Returns:
+        bool : True if there is more than one intersection, False otherwise.
+
+    Raises:
+        ValueError : If the list of formulas is empty.
+    """
    
     if len(formulasList) == 0 :
         raise ValueError("Empty list not accepted")
@@ -42,8 +101,19 @@ def isThereMultipleIntersection(formulasList : List[StlTask]) -> bool :
         
     return False
 
-def haveSameTimeInterval(listOfFormulas : List[StlTask]) -> bool :
-    """check that all formulas might have the same time interval"""
+def haveSameTimeInterval(listOfFormulas : List[StlTask]) -> bool:
+    """
+    Check that all formulas might have the same time interval.
+    
+    Args:
+        listOfFormulas (list[StlTask]) : list of formulas to be considered
+
+    Returns:
+        bool : True if all formulas have the same time interval, False otherwise
+
+    Raises:
+        ValueError : If the list of formulas is empty.
+    """
     if len(listOfFormulas) == 0 :
         raise ValueError("Empty list not accepted")
     if len(listOfFormulas) == 1 :
@@ -56,7 +126,15 @@ def haveSameTimeInterval(listOfFormulas : List[StlTask]) -> bool :
         return True 
 
 def computeTimeIntervalIntersection(formulas :List[StlTask]) -> TimeInterval :
-    """compute intersection of a list of formulas"""
+    """
+    Compute intersection of a list of formulas
+    
+    Args:
+        formulas (list[StlTask]) : list of formulas to be considered
+
+    Returns:
+        intersection (TimeInterval) : intersection of the time intervals of the formulas
+    """
     # time interval intersection can be computed in sequence 
     
     if len(formulas) <2 :
@@ -69,7 +147,15 @@ def computeTimeIntervalIntersection(formulas :List[StlTask]) -> TimeInterval :
     return intersection
 
 def computeVolume(vector):
-    """simply computes the product of elements in a vector"""
+    """
+    Simply computes the product of elements in a vector.
+    
+    Args:
+        vector (np.array) : vector to be considered
+
+    Returns:
+        prod (float) : product of the elements of the vector
+    """
     prod = 1
     n,m = vector.shape
     length = max(n,m)
@@ -80,14 +166,15 @@ def computeVolume(vector):
 
 
 def edgeSet(path:list, isCycle:bool=False) -> List[Tuple[int,int]]:
-    """Given a list of nodes, it returns the edges of the path as (n,n+1) 
-    Inputs 
-    ------------------------------------------------------------------------------------------------
-    path (list<float>) : list of nodes in the path
+    """
+    Given a list of nodes, it returns the edges of the path as (n,n+1)
+
+    Args: 
+        path    (list) : list of nodes in the path
+        isCycle (bool) : if the path is a cycle or not
     
-    Output 
-    ------------------------------------------------------------------------------------------------
-    edges (list<tuple>): list of tuples (n,n+1)
+    Returns:
+        edges (list[tuple]): list of tuples (n,n+1)
     """
 
     if not isCycle:
@@ -105,13 +192,18 @@ def pathMinkowskiSumVertices(listOfFormulas : List[StlTask], edgeList: List[Tupl
     Each formula is define alon one edge of the edgeList in the same sequence as the formulas are given. The edge information is used to 
     decide in which verse we should take the formulas if their direction of definiton is different from the direction of the path for example
     
-    Inputs
-    --------------------------------------------------
-    listOfFormulas (list<StlTask>)
+    Args:
+        listOfFormulas (list[StlTask])        : list of STL formulas to be considered.
+        edgeList       (list[Tuple[int,int]]) : list of edges that contain the formulas in the same order as the formulas are given
     
-    Outputs
-    -----------------------------------------
-    minkowshySumVertices (cvxpy.Variable): returns a matrix where each column is a vertex of the Minkowski sum of the hypercubes defined by each edge in the list of edges
+    Results:
+        minkowshySumVertices (cvxpy.Variable): returns a matrix where each column is a vertex of the Minkowski sum of the hypercubes defined by each edge in the list of edges.
+
+    Raises:
+        ValueError : If the list of formulas does not have the same length as the list of edges.
+        ValueError : If the edge along the path is not matching the corresponding formula. Make sure that the edges order and the formulas order is correct
+        Exception  : If the formula does not have an approximation available. Please replace formula with its approximation before calling this method
+
     """
     
     if len(listOfFormulas) != len(edgeList) :
@@ -157,7 +249,15 @@ def pathMinkowskiSumVertices(listOfFormulas : List[StlTask], edgeList: List[Tupl
 
 def computeOverloadingConstraints(edgeObj: EdgeTaskContainer) -> List[ca.Function]:
     """
-    Given a list of formulas defined on a single edge, it computes the required inclusion constraints due to the conjunction of such formulas along the same edge"""
+    Given a list of formulas defined on a single edge, it computes the required inclusion constraints due to the conjunction of such formulas along the same edge
+    
+    Args:
+        edgeObj (EdgeTaskContainer) : EdgeTaskContainer object containing the formulas to be considered.
+
+    Returns:
+        constraints (List[ca.Function]) : List of constraints. Each constraint is a function that represents the inclusion relationship between two formulas.
+
+    """
     
     formulas = edgeObj.task_list
     # print(len(formulas))
@@ -256,6 +356,20 @@ def computeOverloadingConstraints(edgeObj: EdgeTaskContainer) -> List[ca.Functio
 
 
 def createCycleClosureConstraint(cycleEdgeObjs : List[EdgeTaskContainer],cycleEdges : List[Tuple[int,int]]) -> List[ca.MX] :
+    """
+    Creates the cycle closure constraints for a given cycle.
+
+    This function takes a list of EdgeTaskContainer objects and corresponding edges that form a cycle. 
+    It computes the possible combinations of formulas that can close the cycle and returns the constraints that represent the inclusion of the negative Minkowski sum in the original Minkowski sum.
+
+    Args:
+        cycleEdgeObjs (List[EdgeTaskContainer]) : A list of EdgeTaskContainer objects defined over the cycle.
+        cycleEdges    (List[Tuple[int,int]])    : A list of edges that form the cycle. Each edge corresponds to an EdgeTaskContainer in 'cycleEdgeObjs'.
+
+    Returns:
+        constraints (List[ca.MX]): A list of constraints representing the inclusion of the negative Minkowski sum in the original Minkowski sum.
+
+    """
 
     constraints = []
     if len(cycleEdgeObjs)==0:
@@ -293,7 +407,7 @@ def createCycleClosureConstraint(cycleEdgeObjs : List[EdgeTaskContainer],cycleEd
                     if eventuallyFormula.time_interval <= intervalIntersection :
                         for formula in combination:
                             if not formula.isParametric :
-                                formula.predicate.computeCuboidApproximation() # you need to make the replacement of the originaal predicate with its cuboid under-approximation
+                                formula.predicate.computeCuboidApproximation() # you need to make the replacement of the original predicate with its cuboid under-approximation
         
                         constraints +=  computeMinkowskiInclusionConstraintsForCycle(cycleFormulas = combination,stateSpaceDimension = stateSpaceDim,cycleEdges = cycleEdges)
                         
@@ -324,6 +438,23 @@ def createCycleClosureConstraint(cycleEdgeObjs : List[EdgeTaskContainer],cycleEd
 
 
 def computeMinkowskiInclusionConstraintsForCycle(cycleFormulas:List[StlTask], cycleEdges:List[Tuple[int,int]],stateSpaceDimension : int ) -> List[ca.MX]:
+    """
+    Computes the Minkowski inclusion constraints for a given cycle.
+
+    This function takes a list of STL formulas and corresponding edges that form a cycle, along with the state space dimension. 
+    It computes the Minkowski sum of the formulas along the cycle and returns the constraints that represent the inclusion of the negative Minkowski sum in the original Minkowski sum.
+
+    Args:
+        cycleFormulas       (List[StlTask])        : A list of STL formulas defined over the cycle.
+        cycleEdges          (List[Tuple[int,int]]) : A list of edges that form the cycle. Each edge corresponds to a formula in 'cycleFormulas'.
+        stateSpaceDimension (int)                  : The dimension of the state space.
+
+    Returns:
+        constraints (List[ca.MX]): A list of constraints representing the inclusion of the negative Minkowski sum in the original Minkowski sum.
+
+    Note:
+        The function assumes that the minimum cycle has at least 3 formulas (i.e., it forms a triangle or more complex shape). If the cycle has fewer formulas, the function may not behave as expected.
+    """
     
     
     constraints = []
@@ -353,7 +484,19 @@ def minkowskiSumLinearRepresentation(listOfFormulas : List[StlTask], edgeList:Li
     """
     Given a list of formulas and the corresponding edges directions of path over which the formulas are defined, we  
     compute the matrix A and b representing the minkowski sum of the formulas along the given path 
-    such that the minkowsky sum can be represneted as the linear inequality Ax<=b
+    such that the minkowsky sum can be represneted as the linear inequality Ax<=b.
+
+    Args:
+        listOfFormulas (list[StlTask]) : list of STL formulas
+        edgeList       (list[Tuple[int,int]]) : list of edges that contain the formulas in the same order as the formulas are given
+
+    Returns:
+        A (ca.MX) : matrix A of the linear inequality Ax<=b
+        b (ca.MX) : vector b of the linear inequality Ax<=b
+
+    Raises:
+        ValueError : If the edge along the path is not matching the corresponding formula. Make sure that the edges order and the formulas order is correct
+        Exception  : If the formula does not have an approximation available. Please replace formula with its approximation before calling this method
     
     """
     
@@ -396,7 +539,18 @@ def minkowskiSumLinearRepresentation(listOfFormulas : List[StlTask], edgeList:Li
 
 
 def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict[str, Dict], start_position: Dict[int, np.ndarray], problemDimension = 2, maxInterRobotDistance = 3)-> List[StlTask]: 
-    """ Solves the task decomposition completely"""
+    """
+    Solves the task decomposition completely
+    
+    Args:
+        task_graph            (nx.Graph)              : The task graph.
+        comm_graph            (nx.Graph)              : The communication graph.
+        comm_info             (Dict[str, Dict])       : Communication information. It contains the edgetuple and the boolean value of the communication status.
+        start_position        (Dict[int, np.ndarray]) : Start position of the agents.
+        problemDimension      (int)                   : Dimension of the problem. Default is 2 because we are working with omnidirectional robots.
+        maxInterRobotDistance (float)                 : Maximum distance constraint for each hypercube vertex.
+
+    """
     
     numberOfVerticesHypercube = 2**problemDimension
     
