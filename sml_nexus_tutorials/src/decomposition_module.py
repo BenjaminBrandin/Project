@@ -538,16 +538,16 @@ def minkowskiSumLinearRepresentation(listOfFormulas : List[StlTask], edgeList:Li
     return A,b
 
 
-def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict[str, Dict], start_position: Dict[int, np.ndarray], problemDimension = 2, maxInterRobotDistance = 3)-> List[StlTask]: 
+def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, task_edges:List[tuple], start_position: Dict[int, np.ndarray], problemDimension = 2, maxInterRobotDistance = 3)-> List[StlTask]: 
     """
     Solves the task decomposition completely
     
     Args:
         task_graph            (nx.Graph)              : The task graph.
         comm_graph            (nx.Graph)              : The communication graph.
-        comm_info             (Dict[str, Dict])       : Communication information. It contains the edgetuple and the boolean value of the communication status.
+        task_edges            (List[tuple])           : List of edges in the task graph.
         start_position        (Dict[int, np.ndarray]) : Start position of the agents.
-        problemDimension      (int)                   : Dimension of the problem. Default is 2 because we are working with omnidirectional robots.
+        problemDimension      (int)                   : Dimension of the problem. Default is 2 because we are working with omnidirectional robots on a 2D plane.
         maxInterRobotDistance (float)                 : Maximum distance constraint for each hypercube vertex.
 
     """
@@ -565,12 +565,11 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict
     decompositionSolved   = []
     edges_to_remove       = []
 
-    for (task_key, task_dict) in enumerate(comm_info.values()):
+    for edge in task_edges:
 
-        edge            :List[int]         = task_dict["EDGE"]
         edge_container  :EdgeTaskContainer = task_graph[edge[0]][edge[1]]["container"] 
         has_tasks       :bool              = len(edge_container.task_list) > 0
-        isCommunicating :bool              = task_dict["COMMUNICATE"]
+        isCommunicating :bool              = comm_graph.has_edge(edge[0],edge[1])
     
 
         if (not isCommunicating) and (has_tasks): 
@@ -613,8 +612,13 @@ def computeNewTaskGraph(task_graph:nx.Graph, comm_graph:nx.Graph, comm_info:Dict
                     
                     # set positivity of dimensions vector nu
                     positiveNuConstraint.append(-np.eye(problemDimension)@subformula.nuVar<=np.zeros((problemDimension,1))) # constraint on positivity of the dimension variable
-                    task_graph[sourceNode][targetNode]["container"].add_tasks(subformula) # add the subformula to the edge container
-
+                    
+                    if task_graph.has_edge(sourceNode,targetNode):
+                        task_graph[sourceNode][targetNode]["container"].add_tasks(subformula) # add the subformula to the edge container
+                    else:
+                        task_graph.add_edge(sourceNode,targetNode,container=EdgeTaskContainer(edge_tuple=(sourceNode,targetNode)))
+                        task_graph[sourceNode][targetNode]["container"].add_tasks(subformula) # add the subformula to the edge container
+                                            
 
                     # Set maximum distance constraint for each hypercube vertex
                     if maxInterRobotDistance != None :

@@ -39,6 +39,7 @@ class Manager():
 
         self.agents: dict[int, Agent] = {}
         self.total_tasks: int = 0
+        communication_radius: float = 4
 
         # setup publishers
         self.task_pub = rospy.Publisher("tasks", task_msg, queue_size=10)
@@ -57,18 +58,17 @@ class Manager():
             self.agents[i] = Agent(id=i, initial_state=np.array(state_value))
             start_positions[i] = np.array(state_value)
 
-        # Extracting the edges of the tasks and the communication information
+        # Extracting the edges of the tasks
         task_edges = [tuple(task["EDGE"]) for task in self.tasks.values()]
-        communication_info = {task_name: {"EDGE": task_info["EDGE"], "COMMUNICATE": task_info["COMMUNICATE"]} for task_name, task_info in self.tasks.items()}
 
         # Creating the graphs
-        self.comm_graph = create_communication_graph_from_states(self.agents.keys(), communication_info) 
+        self.comm_graph = create_communication_graph_from_states(start_positions, communication_radius)  
         self.task_graph = create_task_graph_from_edges(edge_list = task_edges) # creates an empty task graph
         self.initial_task_graph = self.task_graph.copy()
 
         # Fill the task graph with the tasks and decompose the edges that are not communicative
         self.update_graph()
-        computeNewTaskGraph(self.task_graph, self.comm_graph, communication_info, start_position=start_positions)
+        computeNewTaskGraph(self.task_graph, self.comm_graph, task_edges, start_position=start_positions)
         
         # publish the tasks
         self.print_tasks()
@@ -117,14 +117,14 @@ class Manager():
         elif task_info["TYPE"] == "formation_predicate":
             predicate = formation_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], 
                                             agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]], relative_pos=np.array(task_info["CENTER"]))
-        elif task_info["TYPE"] == "epsilon_position_closeness_predicate":
+        elif task_info["TYPE"] == "epsilon_position_closeness_predicate": #epsilon_position_closeness_predicate
             predicate = epsilon_position_closeness_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], 
                                                              agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]])
         elif task_info["TYPE"] == "collision_avoidance_predicate":
             predicate = collision_avoidance_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], 
                                                       agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]])
         else:
-            raise Exception("Task type" + str(task_info["TYPE"]) + "is not supported")
+            raise Exception(f'Task type: {task_info["TYPE"]} is not supported')
         
         # Create the temporal operator
         if task_info["TEMP_OP"] == "AlwaysOperator":

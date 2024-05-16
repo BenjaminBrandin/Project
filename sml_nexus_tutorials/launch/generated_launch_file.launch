@@ -4,7 +4,7 @@
   <arg name="gui" default="true" />
   <arg name="headless" default="false" />
 
-  <arg name="num_robots" default="3" />
+  <arg name="num_robots" default="4" />
 
   <include file="$(find gazebo_ros)/launch/empty_world.launch">
     <arg name="debug" value="0" />
@@ -18,7 +18,7 @@
     <!-- Load robot description -->
     <include file="$(find sml_nexus_description)/launch/sml_nexus_description.launch" />
     <!-- Spawn the robot -->
-    <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" args="-urdf -model nexus1 -param robot_description -x -3 -y -3 -z 0.5" />
+    <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" args="-urdf -model nexus1 -param robot_description -x 0 -y 0 -z 0.5" />
     <!-- Controller node -->
     <node name="controller" pkg="sml_nexus_tutorials" type="controller.py" output="screen">
       <param name="robot_name" value="nexus1"/>
@@ -30,7 +30,7 @@
     <!-- Load robot description -->
     <include file="$(find sml_nexus_description)/launch/sml_nexus_description.launch" />
     <!-- Spawn the robot -->
-    <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" args="-urdf -model nexus2 -param robot_description -x 0 -y -2 -z 0.5" />
+    <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" args="-urdf -model nexus2 -param robot_description -x 4 -y 0 -z 0.5" />
     <!-- Controller node -->
     <node name="controller" pkg="sml_nexus_tutorials" type="controller.py" output="screen">
       <param name="robot_name" value="nexus2"/>
@@ -42,10 +42,22 @@
     <!-- Load robot description -->
     <include file="$(find sml_nexus_description)/launch/sml_nexus_description.launch" />
     <!-- Spawn the robot -->
-    <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" args="-urdf -model nexus3 -param robot_description -x -1 -y 3 -z 0.5" />
+    <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" args="-urdf -model nexus3 -param robot_description -x 1 -y 3 -z 0.5" />
     <!-- Controller node -->
     <node name="controller" pkg="sml_nexus_tutorials" type="controller.py" output="screen">
       <param name="robot_name" value="nexus3"/>
+      <param name="num_robots" value="$(arg num_robots)"/>
+    </node>
+  </group>
+
+  <group ns="nexus4">
+    <!-- Load robot description -->
+    <include file="$(find sml_nexus_description)/launch/sml_nexus_description.launch" />
+    <!-- Spawn the robot -->
+    <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" args="-urdf -model nexus4 -param robot_description -x 2 -y 6 -z 0.5" />
+    <!-- Controller node -->
+    <node name="controller" pkg="sml_nexus_tutorials" type="controller.py" output="screen">
+      <param name="robot_name" value="nexus4"/>
       <param name="num_robots" value="$(arg num_robots)"/>
     </node>
   </group>

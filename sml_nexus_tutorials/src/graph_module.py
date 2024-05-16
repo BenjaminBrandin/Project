@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
-
+import numpy as np
 import networkx as nx 
 from builders import StlTask
 from dataclasses import dataclass,field
@@ -141,38 +141,37 @@ def create_task_graph_from_edges(edge_list:Union[List[EdgeTaskContainer], List[T
     return task_graph
 
 
-def create_communication_graph_from_states(states: List[int], communication_info: Dict[str, Dict]) -> nx.Graph:
+def create_communication_graph_from_states(states: Dict[int, np.ndarray], communication_radius: float) -> nx.Graph:
     """
     Create a communication graph that is telling which states are communicating with each other.
 
     Args:
-        states (List[int]): List of states.
-        communication_info (Dict[str, Dict]): Communication information.
+        states (Dict[int, np.ndarray]): A dictionary containing the initial states of the agents.
+        communication_radius (float): The communication range of the agents.
 
     Returns:
         comm_graph (nx.Graph): The communication graph.
 
     Raises:
         Exception: If the edge is not compatible with the states.
-    """
+    """    
+
     comm_graph = nx.Graph()
-    comm_graph.add_nodes_from(states)
+    comm_graph.add_nodes_from(states.keys())
+    others = states.copy()
 
     # Add self-loops
-    for node in states:
-        comm_graph.add_edge(node, node)
+    for state in states.keys():
+        comm_graph.add_edge(state, state)
 
-    for task_info in communication_info.values():
-        if task_info["COMMUNICATE"]:
-            edge = task_info["EDGE"]
-            if edge[0] in states and edge[1] in states:
-                comm_graph.add_edge(edge[0],edge[1])
-            else:
-                raise Exception(f"Edge {edge} is not compatible with the states {states}")
-
+    for id_i,state_i in states.items() :
+        others.pop(id_i)
+        
+        for id_j,state_j in others.items():
+            distance = np.linalg.norm(state_i[:2]-state_j[:2])
+            if distance <= communication_radius:
+                comm_graph.add_edge(id_i,id_j)   
+    
     return comm_graph
-
-
-
 
 
