@@ -117,7 +117,7 @@ class Manager():
         elif task_info["TYPE"] == "formation_predicate":
             predicate = formation_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], 
                                             agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]], relative_pos=np.array(task_info["CENTER"]))
-        elif task_info["TYPE"] == "epsilon_position_closeness_predicate": #epsilon_position_closeness_predicate
+        elif task_info["TYPE"] == "epsilon_position_closeness_predicate": 
             predicate = epsilon_position_closeness_predicate(epsilon=task_info["EPSILON"], agent_i=self.agents[task_info["INVOLVED_AGENTS"][0]], 
                                                              agent_j=self.agents[task_info["INVOLVED_AGENTS"][1]])
         elif task_info["TYPE"] == "collision_avoidance_predicate":
@@ -165,7 +165,6 @@ class Manager():
                 print(f"TEMP_OP: {task.temporal_type}")
                 print(f"INTERVAL: {task.time_interval.aslist}")
                 print(f"INVOLVED_AGENTS: {task.contributing_agents}")
-                print(f"COMMUNICATE: {True}")
                 print("-----------------------------------")
         rospy.sleep(0.5)
         
@@ -183,8 +182,7 @@ class Manager():
                 task_message.epsilon = task.epsilon                         
                 task_message.temp_op = task.temporal_type
                 task_message.interval = task.time_interval.aslist
-                task_message.involved_agents = task.contributing_agents
-                task_message.communicate = True                             
+                task_message.involved_agents = task.contributing_agents                            
 
                 # Then publish the message
                 self.task_pub.publish(task_message)

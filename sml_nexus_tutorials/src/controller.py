@@ -334,8 +334,9 @@ class Controller():
                 optimal_input  = sol['x']
 
             # Publish the velocity command
-            self.vel_cmd_msg.linear.x = np.minimum(optimal_input[0], self.max_velocity)
-            self.vel_cmd_msg.linear.y = np.minimum(optimal_input[1], self.max_velocity)
+            self.vel_cmd_msg.linear.x = np.clip(optimal_input[0], -self.max_velocity, self.max_velocity)
+            self.vel_cmd_msg.linear.y = np.clip(optimal_input[1], -self.max_velocity, self.max_velocity)
+
 
             try:
                 # Get transform from mocap frame to agent frame

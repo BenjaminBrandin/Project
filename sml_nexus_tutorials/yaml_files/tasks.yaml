@@ -4,7 +4,7 @@ TASK_1:
   CENTER: [4, -2]
   EPSILON: 2
   TEMP_OP: "EventuallyOperator"
-  INTERVAL: [30, 50]
+  INTERVAL: [20, 40]
   INVOLVED_AGENTS: [1, 2]
   COMMUNICATE: True
 
@@ -14,7 +14,7 @@ TASK_2:
   CENTER: [8, 8]
   EPSILON: 2
   TEMP_OP: "AlwaysOperator"
-  INTERVAL: [30, 40]
+  INTERVAL: [30, 50]
   INVOLVED_AGENTS: [3]
   COMMUNICATE: True
 
@@ -24,16 +24,6 @@ TASK_3:
   CENTER: [3, 1]
   EPSILON: 2
   TEMP_OP: "EventuallyOperator"
-  INTERVAL: [30, 40]
+  INTERVAL: [30, 50]
   INVOLVED_AGENTS: [1, 4]
-  COMMUNICATE: False
-
-TASK_4:
-  EDGE: [2, 4]
-  TYPE: "collision_avoidance_predicate"
-  CENTER: [0, 0]
-  EPSILON: 0.5
-  TEMP_OP: "AlwaysOperator"
-  INTERVAL: [30, 40]
-  INVOLVED_AGENTS: [2, 4]
-  COMMUNICATE: False
+  COMMUNICATE: True

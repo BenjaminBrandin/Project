@@ -5,4 +5,3 @@ float32 epsilon
 string temp_op
 int32[] interval
 int32[] involved_agents
-bool communicate
