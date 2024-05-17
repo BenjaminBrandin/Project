@@ -17,7 +17,7 @@ build:
 # See https://docs.readthedocs.io/en/stable/guides/reproducible-builds.html
 python:
   install:
-    - requirements: ./Benjamin/Desktop/practice/docs/requirements.txt
+    - requirements: ./Desktop/practice/docs/requirements.txt
       method: pip
       # path:
 
