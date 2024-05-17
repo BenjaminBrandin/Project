@@ -20,7 +20,8 @@ build:
 python:
   install:
     - requirements: docs/requirements.txt
-    - method: pip
+      method: pip
+    - path: /home/benjamin/Desktop/practice/docs
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
