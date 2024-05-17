@@ -20,7 +20,7 @@ python:
     - requirements: docs/requirements.txt
     - method: pip
       path: .
-      extra_requirements: 
+      extra_requirements:
         - -e .
         - file:///home/benjamin/Desktop/practice
 
