@@ -1,11 +1,29 @@
 import yaml
 
 class LaunchFileGenerator:
+    """
+    This class takes a YAML file with initial positions of the robots and generates a launch file that sets up the simulation environment in Gazebo.
+    
+    Attributes:
+        start_pos (dict) : Dictionary of initial positions of the robots.
+    """
     def __init__(self, yaml_file):
+        """
+        This function saves the initial positions of the robots from the YAML file.
+
+        Args:
+            yaml_file (str) : Path to the YAML file containing the initial positions of the robots.
+        """
         with open(yaml_file) as file:
             self.start_pos = yaml.safe_load(file)
 
     def generate_launch_file(self, output_file):
+        """
+        This function generates a launch file that sets up the simulation environment in Gazebo.
+
+        Args:
+            output_file (str) : Path to the output launch file.
+        """
         num_robots = len(self.start_pos)  # Count the number of states (robots)
 
         with open(output_file, 'w') as file:

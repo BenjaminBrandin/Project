@@ -139,7 +139,7 @@ class Manager():
 
     def plot_graph(self):
         """Plots the communication graph, initial task graph, and decomposed task graph."""
-        fig, ax = plt.subplots(3, 1)
+        fig, ax = plt.subplots(1, 3)
         self.draw_graph(ax[0], self.comm_graph, "Communication Graph")
         self.draw_graph(ax[1], self.initial_task_graph, "Initial Task Graph")
         self.draw_graph(ax[2], self.task_graph, "Decomposed Task Graph")
